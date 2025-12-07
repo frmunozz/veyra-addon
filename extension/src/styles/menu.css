@@ -114,3 +114,7 @@
   box-shadow: none;
   pointer-events: none;
 }
+
+.veyra-addon-aside--collapsed .veyra-addon-aside__header {
+  pointer-events: auto;
+}
