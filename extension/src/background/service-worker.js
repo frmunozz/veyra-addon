@@ -89,7 +89,7 @@ function computeDelayMinutes(progress) {
 function scheduleNextPoll(progress, reason, overrideMinutes) {
   const delayInMinutes = overrideMinutes || computeDelayMinutes(progress);
   try {
-    chrome.alarms.create(ALARM_NAME, { delayInMinutes });
+    chrome.alarms.create(ALARM_NAME, { delayInMinutes, periodInMinutes: delayInMinutes });
     log(`Next wave poll in ${delayInMinutes}m`, { reason: reason || "auto", progress });
   } catch (err) {
     warn("failed to schedule poll", err);
