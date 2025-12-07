@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Veyra Addon</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: "Segoe UI", Tahoma, sans-serif;
+      }
+
+      body {
+        margin: 0;
+        padding: 10px;
+        min-width: 220px;
+        background: #0f1115;
+        color: #f2f2f2;
+      }
+
+      h1 {
+        font-size: 16px;
+        margin: 0 0 6px;
+        letter-spacing: 0.2px;
+      }
+
+      p {
+        margin: 0 0 10px;
+        font-size: 13px;
+        opacity: 0.85;
+      }
+
+      .row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 10px;
+        margin: 0 0 10px;
+        border-radius: 8px;
+        background: #151a24;
+        border: 1px solid #222a37;
+      }
+
+      .reload-card {
+        display: none;
+        align-items: center;
+        gap: 10px;
+        padding: 12px;
+        margin: 0 0 12px;
+        border-radius: 10px;
+        background: linear-gradient(135deg, #111827, #0f1420);
+        border: 1px solid #1f2736;
+        box-shadow: 0 6px 18px rgba(0, 0, 0, 0.35);
+      }
+
+      .reload-card.is-visible {
+        display: flex;
+      }
+
+      .reload-icon {
+        display: inline-flex;
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        align-items: center;
+        justify-content: center;
+        background: radial-gradient(circle at 30% 30%, rgba(75, 123, 236, 0.4), rgba(75, 123, 236, 0.15));
+        border: 1px solid rgba(75, 123, 236, 0.3);
+      }
+
+      .reload-icon svg {
+        width: 16px;
+        height: 16px;
+        fill: #8fb7ff;
+      }
+
+      .reload-copy {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+
+      .reload-copy strong {
+        font-size: 13px;
+        letter-spacing: 0.2px;
+      }
+
+      .reload-copy span {
+        font-size: 12px;
+        opacity: 0.85;
+      }
+
+      .reload-btn {
+        border: none;
+        background: linear-gradient(135deg, #4b7bec, #355ad7);
+        color: #f7f9ff;
+        padding: 8px 12px;
+        border-radius: 8px;
+        cursor: pointer;
+        font-size: 12px;
+        font-weight: 600;
+        letter-spacing: 0.1px;
+        box-shadow: 0 4px 10px rgba(53, 90, 215, 0.45);
+        transition: transform 80ms ease, box-shadow 120ms ease, filter 120ms ease;
+      }
+
+      .reload-btn:hover {
+        filter: brightness(1.05);
+      }
+
+      .reload-btn:active {
+        transform: translateY(1px);
+        box-shadow: 0 2px 6px rgba(53, 90, 215, 0.35);
+      }
+
+      .toggle {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 13px;
+      }
+
+      .toggle input {
+        width: 16px;
+        height: 16px;
+        accent-color: #4b7bec;
+        cursor: pointer;
+      }
+
+      .actions {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+
+      .actions a {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 10px;
+        border-radius: 8px;
+        text-decoration: none;
+        background: #1d2330;
+        color: #f5f7fb;
+        border: 1px solid #2c3444;
+        transition: transform 80ms ease, border-color 120ms ease;
+        font-size: 13px;
+      }
+
+      .actions a:hover {
+        border-color: #4b7bec;
+      }
+
+      .actions a:active {
+        transform: translateY(1px);
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Veyra Addon</h1>
+    <p id="version-note">Quick links for testing the extension popup.</p>
+
+    <div class="row">
+      <div class="toggle">
+        <input type="checkbox" id="addon-toggle" />
+        <label for="addon-toggle">Enable addon</label>
+      </div>
+      <span id="status-label" aria-live="polite">Checking…</span>
+    </div>
+
+    <div id="reload-card" class="reload-card" role="status" aria-live="polite">
+      <span class="reload-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+          <path d="M21 4v6h-6l2.24-2.24A6.5 6.5 0 0 0 5.5 12H3a9 9 0 0 1 15.4-5.8L21 4Zm-18 16v-6h6l-2.24 2.24A6.5 6.5 0 0 0 18.5 12H21a9 9 0 0 1-15.4 5.8L3 20Z" />
+        </svg>
+      </span>
+      <div class="reload-copy">
+        <strong>Reload to apply</strong>
+        <span>Refresh the active tab so the addon state updates.</span>
+      </div>
+      <button type="button" id="reload-btn" class="reload-btn">Reload tab</button>
+    </div>
+
+    <div class="actions">
+      <a href="https://demonicscans.org/game_dash.php" target="_blank" rel="noreferrer">Open Veyra dashboard</a>
+      <a href="https://github.com/frmunozz/veyra-addon" target="_blank" rel="noreferrer">Open repository</a>
+    </div>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

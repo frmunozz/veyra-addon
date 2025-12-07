@@ -1,0 +1,23 @@
+{
+  "manifest_version": 3,
+  "name": "Veyra Addon",
+  "description": "Minimal helper layer for the Veyra web game on demonicscans.org.",
+  "version": "0.0.1",
+  "action": {
+    "default_title": "Veyra Addon",
+    "default_popup": "src/popup/popup.html"
+  },
+  "permissions": ["storage", "tabs"],
+  "host_permissions": ["https://demonicscans.org/*"],
+  "content_scripts": [
+    {
+      "matches": ["https://demonicscans.org/*"],
+      "js": ["src/content/content.js"],
+      "css": ["src/styles/content.css"],
+      "run_at": "document_idle"
+    }
+  ],
+  "background": {
+    "service_worker": "src/background/service-worker.js"
+  }
+}
