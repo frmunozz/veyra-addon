@@ -18,4 +18,4 @@
 - Fallbacks: if fetch is blocked/non-OK or markup changes, log once and skip rendering the Guild Dungeons dropdown so the native drawer stays intact.
 
 ## Documentation habit
-- When replicating any new endpoint, record method, URL, params, headers (if required), and triggering UI action in `docs/README.md`.
+- When replicating any new endpoint, record method, URL, params, headers (if required), and triggering UI action in `docs/fetch-guidelines.md` (or a feature-specific doc).
