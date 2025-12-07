@@ -1,5 +1,5 @@
 ## 1. Implementation
-- [x] 1.1 Capture the existing side drawer structure and mount point; add defensive guards so the addon bails out if selectors or events change; validate we can modify the side drawer by inserting an extra item and log the injection/removal to confirm changes apply.
+- [ ] 1.1 Capture the existing side drawer structure and mount point; add defensive guards so the addon bails out if selectors or events change.
 - [ ] 1.2 Implement favorites state (persisted locally) with star icons that move items to a favorites band without triggering navigation.
 - [ ] 1.3 Remove decorative entries (side title, Halloween event) and separate the Hole item from the rest; insert static links for Legendary Forge and Adventurers Guild.
 - [ ] 1.4 Add a Grakthar Gate Waves dropdown with Wave 3/2/1 links, all favoritable.
