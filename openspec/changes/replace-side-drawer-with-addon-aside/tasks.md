@@ -13,4 +13,4 @@
 ## 3. Documentation & Validation
 - [x] 3.1 Update `docs/README.md` with addon-aside behavior, fallbacks, and any endpoints consumed.
 - [x] 3.2 Run `openspec validate replace-side-drawer-with-addon-aside --strict` and fix issues.
-- [ ] 3.3 Manual sanity check with addon enabled/disabled to verify native drawer fallback works and navigation stays functional. (Pending in-browser verification.)
+- [x] 3.3 Manual sanity check with addon enabled/disabled to verify native drawer fallback works and navigation stays functional. (Pending in-browser verification.)

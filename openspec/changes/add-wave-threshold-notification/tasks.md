@@ -6,4 +6,4 @@
 
 ## 2. Validation
 - [x] 2.1 Run `openspec validate add-wave-threshold-notification --strict`.
-- [ ] 2.2 Manual verification: observe polling cadence changes, confirm notification firing at 2500/2500 or after reset, and verify click opens the wave page while auth failures back off gracefully.
+- [x] 2.2 Manual verification: observe polling cadence changes, confirm notification firing at 2500/2500 or after reset, and verify click opens the wave page while auth failures back off gracefully.
