@@ -8,6 +8,10 @@ The addon SHALL initialize on the game dashboard side drawer, removing decorativ
 - **THEN** the addon removes those nodes before rendering addon sections
 - **AND** the Hole item appears separated from other items with a visible spacer or grouping break
 
+#### Scenario: Drawer layout order
+- **WHEN** the addon renders its enhancements
+- **THEN** the favorites band appears at the top, followed by the separated Hole item, and then the remaining navigation (static links and dropdowns) to keep the layout predictable
+
 #### Scenario: Missing expected nodes is non-fatal
 - **WHEN** the expected nodes are absent or selectors fail
 - **THEN** the addon logs a single `[Veyra Addon]` warning and aborts drawer modifications, leaving the native drawer intact
@@ -18,6 +22,10 @@ The addon SHALL render a favorites section and allow starring any navigation ent
 #### Scenario: Star moves item into favorites
 - **WHEN** a user clicks the star icon on a menu item
 - **THEN** the item moves into the favorites section at the top of the drawer, preserving its label and destination, and the page does not navigate
+
+#### Scenario: Starred item removed from source list
+- **WHEN** an item is starred and shown in favorites
+- **THEN** it is hidden from its original menu grouping until unstarred so users do not see duplicates
 
 #### Scenario: Favorites persist and unstar restores placement
 - **WHEN** the page reloads after starring items
@@ -63,6 +71,10 @@ The addon SHALL surface active guild dungeons by reading the Open Dungeons secti
 #### Scenario: Graceful fallback on fetch or parse failure
 - **WHEN** the fetch is blocked, returns non-OK, or the Open Dungeons markup is missing or changed
 - **THEN** the addon logs a concise warning, skips rendering the Guild Dungeons dropdown, and leaves the native drawer untouched
+
+#### Scenario: Empty guild dungeons state
+- **WHEN** `guild_dash.php` returns successfully but no Open Dungeons entries are present
+- **THEN** the Guild Dungeons dropdown renders with a single disabled/empty-state row (e.g., "No open dungeons") and no star controls
 
 ### Requirement: Graceful degradation and isolation
 The addon SHALL avoid breaking site navigation when dependencies change.
