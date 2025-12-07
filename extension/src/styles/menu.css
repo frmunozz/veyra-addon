@@ -1,0 +1,120 @@
+#sideDrawer[data-veyra-addon-hidden="true"] {
+  display: none !important;
+}
+
+.veyra-addon-aside-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  opacity: 0;
+  transition: opacity 160ms ease;
+  z-index: 99996;
+  pointer-events: none;
+}
+
+.veyra-addon-aside-backdrop[data-open="true"] {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.veyra-addon-aside {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 260px;
+  height: 100vh;
+  background: linear-gradient(180deg, rgba(6, 7, 11, 0.98), rgba(10, 12, 18, 0.98));
+  color: #e9edf5;
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 4px 0 18px rgba(0, 0, 0, 0.55);
+  overflow: hidden;
+  z-index: 99997;
+  backdrop-filter: blur(6px);
+  transform: translateX(0);
+  transition: transform 180ms ease, box-shadow 160ms ease, opacity 160ms ease;
+}
+
+.veyra-addon-aside__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgba(14, 17, 25, 0.95);
+}
+
+.veyra-addon-aside__title {
+  font-weight: 700;
+  font-size: 14px;
+  letter-spacing: 0.2px;
+}
+
+.veyra-addon-aside__toggle {
+  border: none;
+  background: #4b7bec;
+  color: #fff;
+  padding: 6px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  transition: background 140ms ease, transform 80ms ease;
+}
+
+.veyra-addon-aside__toggle:hover {
+  background: #3f69cb;
+}
+
+.veyra-addon-aside__toggle:active {
+  transform: translateY(1px);
+}
+
+.veyra-addon-aside__nav {
+  height: calc(100vh - 62px);
+  overflow-y: auto;
+  padding: 10px 0 12px;
+  overscroll-behavior: contain;
+}
+
+.veyra-addon-aside__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.veyra-addon-aside__item {
+  margin: 0;
+}
+
+.veyra-addon-aside__link {
+  display: block;
+  padding: 8px 12px;
+  text-decoration: none;
+  color: #e9edf5;
+  border-radius: 0;
+  transition: background 120ms ease, color 120ms ease, padding-left 120ms ease;
+}
+
+.veyra-addon-aside__link:hover,
+.veyra-addon-aside__link:focus-visible {
+  background: rgba(75, 123, 236, 0.12);
+  color: #ffffff;
+  padding-left: 16px;
+  outline: none;
+}
+
+.veyra-addon-aside--collapsed .veyra-addon-aside__nav {
+  display: none;
+}
+
+.veyra-addon-aside--collapsed {
+  transform: translateX(-105%);
+  box-shadow: none;
+  pointer-events: none;
+}
+
+.veyra-addon-aside--collapsed .veyra-addon-aside__header {
+  pointer-events: auto;
+}

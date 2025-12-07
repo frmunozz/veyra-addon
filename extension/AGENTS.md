@@ -1,7 +1,7 @@
 # Agent Playbook (Extension)
 
 ## Scope and defaults
-- Content script (`src/content/content.js`) is the primary surface for UI + REST interactions.
+- Content scripts are the primary surface for UI + REST interactions (constants in `src/content/constants.js`; menu logic in `src/content/menu.js`).
 - Background worker (`src/background/service-worker.js`) stays empty until cross-tab state/caching/rules are needed.
 - No bundler; plain JS/CSS referenced from `manifest.json`.
 
@@ -12,6 +12,6 @@
 - Patch `fetch`/`XMLHttpRequest` only when necessary, and always preserve original behavior.
 
 ## Daily moves
-- Prototype toolbar/shortcuts in `content.js`; sync styling in `styles/content.css`.
+- Add new UI in focused scripts under `src/content/` (reusing `constants.js`); scope styles in `src/styles/` (e.g., `menu.css`).
 - Store tiny, dependency-free helpers in `src/lib/`.
-- If you add permissions or background logic, document the change in `docs/README.md` and keep it minimal.
+- If you add permissions or background logic, document the change in docs and keep it minimal.
