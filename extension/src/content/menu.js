@@ -22,6 +22,10 @@
     aside: null,
     navFab: null,
     backdrop: null,
+    sectionState: {
+      navigation: true,
+      shortcuts: true,
+    },
   };
 
   const log = (...args) => console.log(TAG, ...args);
@@ -146,7 +150,13 @@
 
     const title = document.createElement("span");
     title.className = "veyra-addon-aside__title";
-    title.textContent = "Veyra Addon Menu";
+
+    const home = document.createElement("a");
+    home.className = "veyra-addon-home";
+    home.href = "/game_dash.php";
+    home.textContent = "Home";
+    home.setAttribute("aria-label", "Go to home");
+    title.appendChild(home);
 
     const toggle = document.createElement("button");
     toggle.type = "button";
@@ -165,6 +175,11 @@
     header.appendChild(toggle);
     aside.appendChild(header);
     aside.appendChild(nav);
+
+    const footer = document.createElement("div");
+    footer.className = "veyra-addon-aside__footer";
+    footer.textContent = "Veyra addon Menu";
+    aside.appendChild(footer);
 
     toggle.addEventListener("click", () => toggleAsideCollapsed(aside, toggle, backdrop));
     setAsideCollapsed(aside, startCollapsed, toggle, backdrop);
@@ -232,8 +247,8 @@
 
   function ensureStaticLinks(items) {
     const entries = [
-      { label: "Legendary Forge", href: "/legendary_forge.php" },
-      { label: "Adventurers Guild", href: "/adventurers_guild.php" },
+      { label: "Legendary Forge", href: "/legendary_forge.php", icon: "✨" },
+      { label: "Adventurers Guild", href: "/adventurers_guild.php", icon: "🏤" },
     ];
     const keys = new Set(items.map((item) => favoriteKey(item)));
 
@@ -247,14 +262,15 @@
     return items;
   }
 
-  function createNavItem(label, href, target = "") {
+  function createNavItem(label, href, target = "", extra = {}) {
     const cleanedLabel = cleanText(label);
     const cleanHref = href || "";
     return {
       label: cleanedLabel,
       href: cleanHref,
       target,
-      key: favoriteKey({ label: cleanedLabel, href: cleanHref }),
+      icon: extra.icon,
+      key: extra.key || favoriteKey({ label: cleanedLabel, href: cleanHref }),
     };
   }
 
@@ -263,11 +279,21 @@
       type: "dropdown",
       key: "grakthar-waves",
       label: "Grakthar Gate Waves",
+      icon: "🌊",
       isOpen: false,
       items: [
-        createNavItem("Wave 3", "/active_wave.php?gate=3&wave=8"),
-        createNavItem("Wave 2", "/active_wave.php?gate=3&wave=5"),
-        createNavItem("Wave 1", "/active_wave.php?gate=3&wave=3"),
+        createNavItem("Grakthar - Wave 3", "/active_wave.php?gate=3&wave=8", "", {
+          key: favoriteKey({ label: "Wave 3", href: "/active_wave.php?gate=3&wave=8" }),
+          icon: "🌊",
+        }),
+        createNavItem("Grakthar - Wave 2", "/active_wave.php?gate=3&wave=5", "", {
+          key: favoriteKey({ label: "Wave 2", href: "/active_wave.php?gate=3&wave=5" }),
+          icon: "🌊",
+        }),
+        createNavItem("Grakthar - Wave 1", "/active_wave.php?gate=3&wave=3", "", {
+          key: favoriteKey({ label: "Wave 1", href: "/active_wave.php?gate=3&wave=3" }),
+          icon: "🌊",
+        }),
       ],
     };
   }
@@ -291,17 +317,52 @@
     return catalog;
   }
 
-  function buildSection(title) {
+  function buildSection(title, options = {}) {
     const section = document.createElement("section");
     section.className = "veyra-addon-section";
-    if (title) {
-      const heading = document.createElement("div");
-      heading.className = "veyra-addon-section__title";
-      heading.textContent = title;
-      section.appendChild(heading);
-    }
     const list = document.createElement("ul");
     list.className = "veyra-addon-aside__list";
+
+    if (title) {
+      const isCollapsible = Boolean(options.collapsibleKey);
+      const heading = document.createElement(isCollapsible ? "button" : "div");
+      heading.className = "veyra-addon-section__title";
+      if (isCollapsible) {
+        heading.classList.add("veyra-addon-section__title-button");
+        heading.type = "button";
+        const listId = `veyra-addon-${options.collapsibleKey}-list`;
+        list.id = listId;
+        heading.setAttribute("aria-controls", listId);
+        let isOpen = STATE.sectionState[options.collapsibleKey] !== false;
+
+        const titleSpan = document.createElement("span");
+        titleSpan.textContent = title;
+        const chevron = document.createElement("span");
+        chevron.className = "veyra-addon-section__chevron";
+
+        const applyVisibility = () => {
+          section.classList.toggle("veyra-addon-section--collapsed", !isOpen);
+          list.hidden = !isOpen;
+          heading.setAttribute("aria-expanded", String(isOpen));
+          chevron.textContent = isOpen ? "▾" : "▸";
+        };
+
+        heading.appendChild(titleSpan);
+        heading.appendChild(chevron);
+        applyVisibility();
+
+        heading.addEventListener("click", () => {
+          isOpen = !isOpen;
+          STATE.sectionState[options.collapsibleKey] = isOpen;
+          applyVisibility();
+        });
+      } else {
+        heading.textContent = title;
+      }
+
+      section.appendChild(heading);
+    }
+
     section.appendChild(list);
     return { section, list };
   }
@@ -348,7 +409,16 @@
 
     const link = document.createElement(options.asSpan ? "span" : "a");
     link.className = "veyra-addon-aside__link";
-    link.textContent = item.label;
+    const label = document.createElement("span");
+    label.className = "veyra-addon-aside__label";
+    if (item.icon) {
+      const icon = document.createElement("span");
+      icon.className = "veyra-addon-icon";
+      icon.textContent = item.icon;
+      label.appendChild(icon);
+    }
+    label.appendChild(document.createTextNode(item.label));
+    link.appendChild(label);
     if (!options.asSpan) {
       link.href = item.href;
       if (item.target) {
@@ -390,9 +460,9 @@
     return { section, favoriteKeys };
   }
 
-  function renderLinkGroup(title, items, favoriteKeys) {
+  function renderLinkGroup(title, items, favoriteKeys, options = {}) {
     if (!items.length) return null;
-    const { section, list } = buildSection(title);
+    const { section, list } = buildSection(title, options);
     items.forEach((item) => {
       list.appendChild(createLinkRow(item, favoriteKeys));
     });
@@ -407,28 +477,36 @@
     toggle.type = "button";
     toggle.className = "veyra-addon-dropdown__toggle";
     toggle.setAttribute("aria-expanded", String(Boolean(dropdown.isOpen)));
-    toggle.textContent = dropdown.label;
+    const label = document.createElement("span");
+    label.className = "veyra-addon-dropdown__label";
+    if (dropdown.icon) {
+      const icon = document.createElement("span");
+      icon.className = "veyra-addon-icon";
+      icon.textContent = dropdown.icon;
+      label.appendChild(icon);
+    }
+    label.appendChild(document.createTextNode(dropdown.label));
+    toggle.appendChild(label);
 
     const chevron = document.createElement("span");
     chevron.className = "veyra-addon-dropdown__chevron";
     chevron.setAttribute("aria-hidden", "true");
-    chevron.textContent = dropdown.isOpen ? "v" : ">";
+    chevron.textContent = dropdown.isOpen ? "▾" : "▸";
     toggle.appendChild(chevron);
 
     const list = document.createElement("ul");
     list.className = "veyra-addon-dropdown__list";
     list.hidden = !dropdown.isOpen;
 
-    const visibleItems =
-      dropdown.items?.filter((item) => item.type === "empty" || !favoriteKeys.has(item.key)) || [];
+    const dropdownItems = dropdown.items || [];
 
-    if (!visibleItems.length) {
+    if (!dropdownItems.length) {
       const empty = document.createElement("li");
       empty.className = "veyra-addon-aside__item veyra-addon-aside__item--empty";
-      empty.textContent = "All items are in favorites.";
+      empty.textContent = "No items available.";
       list.appendChild(empty);
     } else {
-      visibleItems.forEach((item) => {
+      dropdownItems.forEach((item) => {
         if (item.type === "empty") {
           list.appendChild(createLinkRow(item, favoriteKeys, { asSpan: true, disabled: true, hideStar: true }));
         } else {
@@ -441,7 +519,7 @@
       dropdown.isOpen = !dropdown.isOpen;
       list.hidden = !dropdown.isOpen;
       toggle.setAttribute("aria-expanded", String(Boolean(dropdown.isOpen)));
-      chevron.textContent = dropdown.isOpen ? "v" : ">";
+      chevron.textContent = dropdown.isOpen ? "▾" : "▸";
     });
 
     wrapper.appendChild(toggle);
@@ -457,7 +535,7 @@
     const { section: favoritesSection, favoriteKeys } = renderFavoritesSection(catalog);
     STATE.navRoot.appendChild(favoritesSection);
 
-    if (STATE.holeItem && !favoriteKeys.has(STATE.holeItem.key)) {
+    if (STATE.holeItem) {
       const holeSection = renderLinkGroup("Hole", [STATE.holeItem], favoriteKeys);
       if (holeSection) {
         holeSection.classList.add("veyra-addon-section--spaced");
@@ -465,15 +543,14 @@
       }
     }
 
-    const visibleNavItems = STATE.navItems.filter((item) => !favoriteKeys.has(item.key));
-    const mainSection = renderLinkGroup("Navigation", visibleNavItems, favoriteKeys);
+    const mainSection = renderLinkGroup("Navigation", STATE.navItems, favoriteKeys, { collapsibleKey: "navigation" });
     if (mainSection) {
       STATE.navRoot.appendChild(mainSection);
     }
 
     const dropdowns = [STATE.waveDropdown, STATE.guildDropdown].filter(Boolean);
     if (dropdowns.length) {
-      const dropdownSection = buildSection("Shortcuts");
+      const dropdownSection = buildSection("Shortcuts", { collapsibleKey: "shortcuts" });
       dropdowns.forEach((dropdown) => {
         dropdownSection.list.appendChild(renderDropdown(dropdown, favoriteKeys));
       });
@@ -502,6 +579,20 @@
     return cleanText(link.textContent || "");
   }
 
+  function extractDungeonNamesFromSelectors(doc) {
+    const selectors = [
+      "body > div.wrap > div:nth-child(6) > div:nth-child(1) > div > div:nth-child(1) > div:nth-child(2)",
+      "body > div.wrap > div:nth-child(6) > div:nth-child(1) > div > div:nth-child(2) > div:nth-child(2)",
+    ];
+
+    return selectors
+      .map((selector) => {
+        const node = doc.querySelector(selector);
+        return cleanText(node?.textContent || "");
+      })
+      .filter(Boolean);
+  }
+
   function parseOpenDungeons(html) {
     const parser = new DOMParser();
     const doc = parser.parseFromString(html, "text/html");
@@ -519,16 +610,57 @@
     }
 
     const links = Array.from(region.querySelectorAll("a[href*='guild_dungeon_instance']"));
+    const nameHints = extractDungeonNamesFromSelectors(doc);
     const entries = links
-      .map((link) => {
+      .map((link, index) => {
         const href = link.getAttribute("href");
-        const name = parseDungeonName(link);
+        const hintedName = nameHints[index];
+        const name = hintedName || parseDungeonName(link);
         if (!href || !name) return null;
-        return createNavItem(name, href, link.getAttribute("target") || "");
+        return createNavItem(name, href, link.getAttribute("target") || "", { icon: "🧌" });
       })
       .filter(Boolean);
 
     return { items: dedupeItems(entries), missing: false };
+  }
+
+  function syncDungeonFavorites(latestItems) {
+    if (!Array.isArray(latestItems) || !latestItems.length || !STATE.favorites.length) return;
+    const latestByLabel = new Map();
+    latestItems.forEach((item) => {
+      const label = cleanText(item.label).toLowerCase();
+      if (label) latestByLabel.set(label, item);
+    });
+
+    let changed = false;
+    const seen = new Set();
+    const nextFavorites = [];
+
+    STATE.favorites.forEach((fav) => {
+      let nextFav = fav;
+      const isDungeon = fav.href?.includes("guild_dungeon_instance");
+      if (isDungeon) {
+        const match = latestByLabel.get(cleanText(fav.label).toLowerCase());
+        if (match && match.href !== fav.href) {
+          nextFav = {
+            ...fav,
+            href: match.href,
+            target: match.target || fav.target || "",
+            key: favoriteKey({ label: fav.label, href: match.href }),
+          };
+          changed = true;
+        }
+      }
+
+      if (!seen.has(nextFav.key)) {
+        seen.add(nextFav.key);
+        nextFavorites.push(nextFav);
+      }
+    });
+
+    if (changed) {
+      setFavorites(nextFavorites);
+    }
   }
 
   async function loadGuildDungeons() {
@@ -550,6 +682,7 @@
           type: "dropdown",
           key: "guild-dungeons",
           label: "Guild Dungeons",
+          icon: "🧌",
           isOpen: false,
           items: [{ type: "empty", label: "No open dungeons", key: "guild-dungeons-empty" }],
         };
@@ -561,9 +694,11 @@
         type: "dropdown",
         key: "guild-dungeons",
         label: "Guild Dungeons",
+        icon: "🧌",
         isOpen: false,
         items: parsed.items,
       };
+      syncDungeonFavorites(parsed.items);
       renderNav();
     } catch (err) {
       warn("Guild dungeons fetch threw; skipping dropdown.", err);

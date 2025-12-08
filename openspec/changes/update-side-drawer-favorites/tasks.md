@@ -5,6 +5,11 @@
 - [x] 1.4 Add a Grakthar Gate Waves dropdown inside the addon aside with Wave 3/2/1 links, all favoritable.
 - [x] 1.5 Fetch and parse Open Dungeons from `guild_dash.php`; render a Guild Dungeons dropdown with favoritable entries and safe fallbacks on fetch/DOM changes without breaking the addon aside or native fallback.
 - [x] 1.6 Apply scoped styling for favorites spacing, Hole separation, and dropdown affordances inside the addon aside.
+- [x] 1.7 Keep starred items visible in their source lists with gold star indicators while duplicating them into favorites.
+- [x] 1.8 Place the Home control in the addon aside header, remove the "Veyra Addon Menu" header label, and add a footer tag with "Veyra addon Menu".
+- [x] 1.9 Add icons for Legendary Forge (✨), Adventurers Guild (🏤), Grakthar Gate Waves (🌊), and Guild Dungeons (🧌) entries.
+- [x] 1.10 Make the Navigation and Shortcuts sections collapsible and ensure wave/dungeon dropdown headers reliably toggle without navigation.
+- [x] 1.11 Prefix wave labels with "Grakthar - " and parse Guild Dungeon names from the specified containers before rendering.
 
 ## 2. Documentation & Validation
 - [x] 2.1 Record the `guild_dash.php` Open Dungeons behavior and new menu links in `docs/README.md`.
