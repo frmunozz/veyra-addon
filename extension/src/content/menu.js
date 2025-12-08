@@ -9,7 +9,13 @@
   const ASIDE_BACKDROP_ID = C.ASIDE_BACKDROP_ID || "veyra-addon-aside-backdrop";
   const MENU_MOUNT_FLAG = C.MENU_MOUNT_FLAG || "veyraAddonMenuMounted";
   const FAVORITES_KEY = C.FAVORITES_KEY || "veyraAddonFavorites";
+  const SECTION_STATE_KEY = C.SECTION_STATE_KEY || "veyraAddonSectionState";
   const GUILD_DASH_PATH = "/guild_dash.php";
+
+  const DEFAULT_SECTION_STATE = {
+    navigation: true,
+    shortcuts: true,
+  };
 
   const STATE = {
     asideBailed: false,
@@ -22,10 +28,7 @@
     aside: null,
     navFab: null,
     backdrop: null,
-    sectionState: {
-      navigation: true,
-      shortcuts: true,
-    },
+    sectionState: loadSectionState(),
   };
 
   const log = (...args) => console.log(TAG, ...args);
@@ -85,6 +88,31 @@
     STATE.favorites = nextFavorites;
     persistFavorites(nextFavorites);
     renderNav();
+  }
+
+  function loadSectionState() {
+    try {
+      const stored = localStorage.getItem(SECTION_STATE_KEY);
+      if (!stored) return { ...DEFAULT_SECTION_STATE };
+      const parsed = JSON.parse(stored);
+      if (!parsed || typeof parsed !== "object") return { ...DEFAULT_SECTION_STATE };
+      return {
+        ...DEFAULT_SECTION_STATE,
+        navigation: parsed.navigation !== false,
+        shortcuts: parsed.shortcuts !== false,
+      };
+    } catch (err) {
+      warn("Failed to read section state; using defaults.", err);
+      return { ...DEFAULT_SECTION_STATE };
+    }
+  }
+
+  function persistSectionState(state) {
+    try {
+      localStorage.setItem(SECTION_STATE_KEY, JSON.stringify(state));
+    } catch (err) {
+      warn("Failed to persist section state; continuing in-memory only.", err);
+    }
   }
 
   function extractNavItems(container) {
@@ -354,6 +382,7 @@
         heading.addEventListener("click", () => {
           isOpen = !isOpen;
           STATE.sectionState[options.collapsibleKey] = isOpen;
+          persistSectionState(STATE.sectionState);
           applyVisibility();
         });
       } else {
