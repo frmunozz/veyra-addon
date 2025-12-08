@@ -7,6 +7,8 @@ const WAVE_URL = "https://demonicscans.org/active_wave.php?gate=3&wave=8";
 const WAVE_PAGE_URL = WAVE_URL;
 const STORAGE_KEY = "veyraAddonWaveState";
 const NOTIFICATION_ID = "veyra-addon-wave-spawn";
+const HEARTBEAT_NOTIFICATION_ID = "veyra-addon-wave-heartbeat";
+const HEARTBEAT_NOTIFICATION_PREFIX = `${HEARTBEAT_NOTIFICATION_ID}-`;
 const ALARM_NAME = "veyra-addon-wave-poll";
 const NOTIFICATION_ICON = "assets/notification.png";
 const POLL_MINUTES = (self.VeyraAddonBgConstants && self.VeyraAddonBgConstants.POLL_INTERVALS_MINUTES) || {
@@ -19,6 +21,9 @@ const DEFAULT_STATE = { lastProgress: null, warnedAuthOrParse: false };
 
 const state = { ...DEFAULT_STATE, lastNotifiedAt: 0, thresholdDumped: false };
 let pollInFlight = false;
+let notificationPermissionWarned = false;
+let resolvedNotificationIconUrl;
+let attemptedIconResolve = false;
 
 const log = (...args) => console.log(TAG, ...args);
 const warn = (...args) => console.warn(TAG, ...args);
@@ -94,6 +99,34 @@ function scheduleNextPoll(progress, reason, overrideMinutes) {
   } catch (err) {
     warn("failed to schedule poll", err);
   }
+}
+
+function formatProgressText(progress) {
+  if (!progress || !Number.isFinite(progress.current)) return "unknown";
+  const target = Number(progress.target || TARGET_THRESHOLD);
+  const current = Number(progress.current);
+  const currentText = Number.isFinite(current) ? current.toLocaleString() : "unknown";
+  if (!Number.isFinite(target) || target <= 0) return currentText;
+  return `${currentText}/${target.toLocaleString()}`;
+}
+
+async function resolveNotificationIconUrl() {
+  if (attemptedIconResolve) return resolvedNotificationIconUrl || undefined;
+  attemptedIconResolve = true;
+  let iconUrl = chrome.runtime.getURL(NOTIFICATION_ICON);
+  try {
+    const res = await fetch(iconUrl);
+    if (!res.ok) {
+      warn("notification icon fetch failed", { status: res.status });
+      iconUrl = undefined;
+    }
+  } catch (err) {
+    warn("notification icon fetch error", err);
+    iconUrl = undefined;
+  }
+
+  resolvedNotificationIconUrl = iconUrl;
+  return resolvedNotificationIconUrl || undefined;
 }
 
 function parseProgress(html) {
@@ -257,9 +290,14 @@ async function ensureNotificationPermission() {
 async function createSpawnNotification(reason, progress) {
   const permissionGranted = await ensureNotificationPermission();
   if (!permissionGranted) {
-    warn("notifications not permitted; skipping wave alert");
+    if (!notificationPermissionWarned) {
+      warn("notifications not permitted; skipping wave alert");
+      notificationPermissionWarned = true;
+    }
     return false;
   }
+
+  notificationPermissionWarned = false;
 
   const message = "general spawned!";
   const target = (progress && progress.target) || TARGET_THRESHOLD;
@@ -268,17 +306,7 @@ async function createSpawnNotification(reason, progress) {
       ? `Wave threshold reset after reaching ${target}.`
       : `Wave threshold hit ${target}/${target}.`;
 
-  let iconUrl = chrome.runtime.getURL(NOTIFICATION_ICON);
-  try {
-    const res = await fetch(iconUrl);
-    if (!res.ok) {
-      warn("notification icon fetch failed", { status: res.status });
-      iconUrl = undefined;
-    }
-  } catch (err) {
-    warn("notification icon fetch error", err);
-    iconUrl = undefined;
-  }
+  const iconUrl = await resolveNotificationIconUrl();
 
   return new Promise((resolve) => {
     chrome.notifications.create(
@@ -298,6 +326,50 @@ async function createSpawnNotification(reason, progress) {
           return;
         }
         state.lastNotifiedAt = Date.now();
+        resolve(Boolean(id));
+      }
+    );
+  });
+}
+
+async function createHeartbeatNotification(status, progress) {
+  const permissionGranted = await ensureNotificationPermission();
+  if (!permissionGranted) {
+    if (!notificationPermissionWarned) {
+      warn("notifications not permitted; skipping wave heartbeat", { status });
+      notificationPermissionWarned = true;
+    }
+    return false;
+  }
+
+  notificationPermissionWarned = false;
+
+  const iconUrl = await resolveNotificationIconUrl();
+  const progressText = formatProgressText(progress);
+  const isError = status === "fetch-error" || status === "parse-miss";
+  const message = isError ? "Wave poll heartbeat (issue)" : `Wave heartbeat: ${progressText}`;
+  const contextMessage = isError
+    ? `Polling failed (${status}); last seen ${progressText}.`
+    : `No spawn detected; latest progress ${progressText}.`;
+  const notificationId = `${HEARTBEAT_NOTIFICATION_PREFIX}${Date.now()}`;
+
+  return new Promise((resolve) => {
+    chrome.notifications.create(
+      notificationId,
+      {
+        type: "basic",
+        title: "Veyra Addon",
+        message,
+        contextMessage,
+        iconUrl,
+        priority: isError ? 2 : 0,
+      },
+      (id) => {
+        if (chrome.runtime?.lastError) {
+          warn("heartbeat notification failed", chrome.runtime.lastError);
+          resolve(false);
+          return;
+        }
         resolve(Boolean(id));
       }
     );
@@ -325,6 +397,7 @@ async function handleWavePoll(trigger) {
         warn("wave fetch failed; backing off", err);
       }
       await saveState(state);
+      await createHeartbeatNotification("fetch-error", lastProgress);
       scheduleNextPoll(lastProgress, "fetch-error", POLL_MINUTES.low);
       return;
     }
@@ -335,6 +408,7 @@ async function handleWavePoll(trigger) {
         warn("wave progress missing; backing off");
       }
       await saveState(state);
+      await createHeartbeatNotification("parse-miss", lastProgress);
       scheduleNextPoll(lastProgress, "parse-miss", POLL_MINUTES.low);
       return;
     }
@@ -353,13 +427,17 @@ async function handleWavePoll(trigger) {
       }
     } else {
       log("wave progress no notify", { progress, lastProgress });
+      const heartbeatSent = await createHeartbeatNotification("no-spawn", progress);
+      if (!heartbeatSent) {
+        log("wave heartbeat notification skipped (permission or error)");
+      }
     }
 
     state.lastProgress = progress;
     await saveState(state);
     scheduleNextPoll(progress, trigger || "success");
   } finally {
-  log("wave poll end");
+    log("wave poll end");
     pollInFlight = false;
   }
 }
@@ -394,7 +472,8 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 });
 
 chrome.notifications.onClicked.addListener((notificationId) => {
-  if (notificationId !== NOTIFICATION_ID) return;
+  const isHeartbeat = notificationId === HEARTBEAT_NOTIFICATION_ID || (typeof notificationId === "string" && notificationId.startsWith(HEARTBEAT_NOTIFICATION_PREFIX));
+  if (notificationId !== NOTIFICATION_ID && !isHeartbeat) return;
   chrome.notifications.clear(notificationId);
   chrome.tabs.create({ url: WAVE_PAGE_URL });
 });

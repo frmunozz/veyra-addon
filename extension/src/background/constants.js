@@ -1,6 +1,6 @@
 (() => {
   const defaults = {
-    POLL_INTERVALS_MINUTES: { low: 30, mid: 10, high: 1 },
+    POLL_INTERVALS_MINUTES: { low: 3, mid: 2, high: 1 },
     WAVE_TARGET: 2400,
   };
 
