@@ -75,6 +75,13 @@
   overscroll-behavior: contain;
 }
 
+.veyra-addon-aside__sections {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 6px 0;
+}
+
 .veyra-addon-aside__list {
   list-style: none;
   margin: 0;
@@ -95,6 +102,7 @@
   color: #e9edf5;
   border-radius: 0;
   transition: background 120ms ease, color 120ms ease, padding-left 120ms ease;
+  flex: 1;
 }
 
 .veyra-addon-aside__link:hover,
@@ -103,6 +111,100 @@
   color: #ffffff;
   padding-left: 16px;
   outline: none;
+}
+
+.veyra-addon-aside__item--empty {
+  color: #94a3b8;
+  font-size: 12px;
+  padding: 6px 10px;
+}
+
+.veyra-addon-section {
+  padding: 0 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.veyra-addon-section__title {
+  font-size: 12px;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+  color: #9fb3d2;
+}
+
+.veyra-addon-section--spaced {
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  padding-top: 10px;
+  margin-top: 2px;
+}
+
+.veyra-addon-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.veyra-addon-row--muted .veyra-addon-aside__link {
+  color: #94a3b8;
+}
+
+.veyra-addon-star {
+  border: none;
+  background: transparent;
+  color: #b8c7e5;
+  cursor: pointer;
+  font-size: 16px;
+  padding: 4px;
+  transition: color 120ms ease, transform 80ms ease;
+}
+
+.veyra-addon-star:hover {
+  color: #ffffff;
+  transform: translateY(-1px);
+}
+
+.veyra-addon-star--active {
+  color: #fbbf24;
+}
+
+.veyra-addon-dropdown {
+  list-style: none;
+}
+
+.veyra-addon-dropdown__toggle {
+  width: 100%;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+  color: #e9edf5;
+  padding: 8px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+
+.veyra-addon-dropdown__toggle:hover {
+  border-color: rgba(75, 123, 236, 0.5);
+  background: rgba(75, 123, 236, 0.1);
+}
+
+.veyra-addon-dropdown__chevron {
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.veyra-addon-dropdown__list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .veyra-addon-aside--collapsed .veyra-addon-aside__nav {
