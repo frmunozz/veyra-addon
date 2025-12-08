@@ -18,6 +18,12 @@
       "js": ["src/content/constants.js", "src/content/menu.js"],
       "css": ["src/styles/menu.css"],
       "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://demonicscans.org/active_wave.php*"],
+      "js": ["src/content/constants.js", "src/content/wave-monster-tools.js"],
+      "css": ["src/styles/wave-monster-tools.css"],
+      "run_at": "document_idle"
     }
   ],
   "background": {
