@@ -4,7 +4,9 @@
   "description": "Minimal helper layer for the Veyra web game on demonicscans.org.",
   "version": "0.0.1",
   "icons": {
-    "128": "assets/notification.png"
+    "16": "assets/icon16.png",
+    "48": "assets/icon48.png",
+    "128": "assets/icon128.png"
   },
   "action": {
     "default_title": "Veyra Addon",
