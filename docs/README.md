@@ -17,8 +17,12 @@
   - Auto-refreshes progress about once every 5 minutes while the addon aside is mounted; on fetch/parse failure the progress shows `—/—` and logs a warning.
 
 ## Wave monster tools
-- Wave pages detected via `.monster-container` cards or `#toggleDeadBtn`; monster names come from `body > div.monster-container > div:nth-child(1) > h3`.
-- Dead monsters surface a floating "Wave Tools" menu (top-right) with filter checkboxes (hides non-selected cards via `display: none`) and bulk loot controls when cookie `hide_dead_monsters=0`.
-- Bulk loot requests `GET /loot.php?id={monsterId}` with `credentials: "include"`, spaced by ~500ms, only for currently visible cards; failures are skipped and counted.
-- Per-card loot/View actions replace the dead-monster CTA; single loot also calls `loot.php?id=...` and renders a modal with items/rewards from the response (items expected to include `ITEM_ID`, optional `ITEM_IMAGE`, counts).
-- Bulk loot aggregates items by `ITEM_ID` and sums rewards (EXP/Gold) into a single summary modal; modals close via the X control or backdrop.
+- Wave pages detected via `.monster-card` entries, `#toggleDeadBtn`, or an allowlist of gate wave URLs; when detected the addon hides `body > div.gate-info` to reduce clutter.
+- Floating Wave Tools menu (top-right) includes:
+  - Filter checkboxes labeled like `[05] Monster Name` (counts padded to 2 digits under 100).
+  - "hide all" / "show all" buttons; selecting 0 types hides all monster cards (no auto-restore).
+  - A "Show monster images" checkbox that hides/shows `.monster-img` elements.
+  - Filter selections persist per wave page via `localStorage["veyra-addon-wave-filters:${pathname}?${search}"]` and are shared between alive/dead views.
+- Dead monsters (`hide_dead_monsters=0`) enable bulk loot controls with quick buttons (1/5/10/15/all) + a custom count input; "all" prompts for confirmation and an in-progress run shows a Stop button.
+- Looting calls `POST /loot.php` with form-encoded `monster_id` + `user_id` (from `demon`/`user_id` cookies), `credentials: "include"`, spaced by ~500ms; bulk loot shows a progress badge and aggregates results into one modal.
+- Bulk loot skips monsters already successfully looted in the current page session (tracked in-memory across quick loot + bulk loot; resets on reload).
