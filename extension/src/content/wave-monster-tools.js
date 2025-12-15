@@ -12,6 +12,14 @@
   const USER_ID_COOKIE = "demon";
   const BULK_DEFAULT_COUNT = 5;
   const LOOT_DELAY_MS = 520;
+  const DATASET_NAME_KEY = "veyraAddonMonsterName";
+  const DATASET_ID_KEY = "veyraAddonMonsterId";
+  const GUILD_MONSTER_CONTAINER_SELECTORS = [
+    "body > div.wrap > div.grid > div:nth-child(1) > div:nth-child(2)",
+    "body > div.wrap > div.grid > div:nth-child(1)",
+    "body > div.wrap > div.grid",
+    "body > div.wrap",
+  ];
   const WAVE_WHITELIST = [
     "/active_wave.php?gate=3&wave=3",
     "/active_wave.php?gate=3&wave=5",
@@ -23,6 +31,13 @@
 
   const cleanText = (value) => (value || "").replace(/\s+/g, " ").trim();
   const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  const detectPageType = () => {
+    const path = String(location.pathname || "");
+    if (path.endsWith("/active_wave.php")) return "wave";
+    if (path.endsWith("/guild_dungeon_location.php")) return "guild_dungeon_location";
+    return "unknown";
+  };
 
   const getCookie = (name) => {
     const cookies = document.cookie ? document.cookie.split(";") : [];
@@ -45,10 +60,81 @@
     if (!href) return null;
     try {
       const url = new URL(href, location.origin);
-      return url.searchParams.get("id") || url.searchParams.get("monster_id");
+      return (
+        url.searchParams.get("id") ||
+        url.searchParams.get("monster_id") ||
+        url.searchParams.get("monsterId") ||
+        url.searchParams.get("enemy_id") ||
+        url.searchParams.get("dgmid") ||
+        url.searchParams.get("dgmId")
+      );
     } catch (_err) {
       return null;
     }
+  };
+
+  const extractInstanceId = (href) => {
+    if (!href) return null;
+    try {
+      const url = new URL(href, location.origin);
+      return url.searchParams.get("instance_id") || url.searchParams.get("instanceId");
+    } catch (_err) {
+      return null;
+    }
+  };
+
+  const extractMonsterIdFromInputs = (root) => {
+    if (!root) return null;
+    const candidate =
+      root.querySelector("input[name='monster_id']") ||
+      root.querySelector("input[name='monsterId']") ||
+      root.querySelector("input[name='id']") ||
+      root.querySelector("input[name='enemy_id']");
+    const value = candidate ? cleanText(candidate.value) : "";
+    return value || null;
+  };
+
+  const extractMonsterIdFromLinks = (root) => {
+    if (!root) return null;
+    const links = Array.from(root.querySelectorAll("a[href]"))
+      .map((a) => a.getAttribute("href"))
+      .filter(Boolean);
+    for (const href of links) {
+      const id = extractMonsterId(href);
+      if (id) return id;
+    }
+    return null;
+  };
+
+  const pickViewHref = (root, monsterId) => {
+    if (!root) return "";
+    const links = Array.from(root.querySelectorAll("a[href]"))
+      .map((a) => a.getAttribute("href"))
+      .filter((href) => href && !href.startsWith("#") && !href.startsWith("javascript:"));
+    if (!links.length) return "";
+    if (monsterId) {
+      const exact = links.find((href) => String(extractMonsterId(href) || "") === String(monsterId));
+      if (exact) return exact;
+    }
+    return links[0] || "";
+  };
+
+  const findGuildMonsterContainer = () => {
+    for (const selector of GUILD_MONSTER_CONTAINER_SELECTORS) {
+      const node = document.querySelector(selector);
+      if (!node) continue;
+      if (node.querySelector(".mon")) return node;
+    }
+    return null;
+  };
+
+  const extractGuildMonsterName = (titleNode) => {
+    if (!titleNode) return "";
+    const clone = titleNode.cloneNode(true);
+    clone.querySelectorAll(".row, .pill, .veyra-addon-wave-alive-count, .veyra-addon-wave-actions").forEach((n) => {
+      n.remove();
+    });
+    return cleanText(clone.textContent);
   };
 
   const isWhitelistedWaveUrl = () => {
@@ -69,12 +155,17 @@
     );
     return cards
       .map((el) => {
+        const storedName = cleanText(el.dataset && el.dataset[DATASET_NAME_KEY]);
         const nameNode = el.querySelector("h3") || el.querySelector("strong");
         const name =
+          storedName ||
           cleanText(nameNode ? nameNode.textContent : "") ||
           cleanText(el.getAttribute("data-name")) ||
           cleanText(el.dataset && el.dataset.name) ||
           "";
+        if (!storedName && name) {
+          el.dataset[DATASET_NAME_KEY] = name;
+        }
         const cta =
           el.querySelector("a[href*='battle.php']") ||
           el.querySelector(":scope > div:nth-child(2) > a[href]") ||
@@ -92,9 +183,70 @@
           cta,
           viewHref,
           monsterId,
+          isDead: false,
         };
       })
-      .filter((entry) => entry && entry.el && entry.monsterId);
+      .filter((entry) => entry && entry.el && entry.name);
+  };
+
+  const collectGuildDungeonMonsters = () => {
+    const container = findGuildMonsterContainer();
+    if (!container) return [];
+
+    const cards = Array.from(container.querySelectorAll("div.mon"));
+    return cards
+      .map((el) => {
+        const storedName = cleanText(el.dataset && el.dataset[DATASET_NAME_KEY]);
+        const detailColumn = el.querySelector(":scope > div");
+        const titleNode = detailColumn ? detailColumn.querySelector(":scope > div") : null;
+
+        let name = storedName || extractGuildMonsterName(titleNode);
+        if (!name) {
+          const img = el.querySelector("img[alt]");
+          name = cleanText(img ? img.getAttribute("alt") : "");
+        }
+
+        if (!storedName && name) {
+          el.dataset[DATASET_NAME_KEY] = name;
+        }
+
+        const storedMonsterId = cleanText(el.dataset && el.dataset[DATASET_ID_KEY]);
+        const viewLink =
+          el.querySelector("a.btn[href*='battle.php']") ||
+          el.querySelector("a[href*='battle.php']") ||
+          el.querySelector("a.btn[href]") ||
+          el.querySelector("a[href]");
+        const viewHref = viewLink ? viewLink.getAttribute("href") : "";
+        const instanceId = extractInstanceId(viewHref);
+
+        const monsterId =
+          storedMonsterId ||
+          el.getAttribute("data-monster-id") ||
+          (el.dataset && (el.dataset.monsterId || el.dataset.monster_id || el.dataset.id)) ||
+          extractMonsterIdFromInputs(el) ||
+          extractMonsterId(viewHref) ||
+          extractMonsterIdFromLinks(el);
+
+        if (!storedMonsterId && monsterId) {
+          el.dataset[DATASET_ID_KEY] = monsterId;
+        }
+
+        const label = name || (monsterId ? `Monster ${monsterId}` : "Unknown");
+        const canLoot = Boolean(el.querySelector(".pill-warn")) && Boolean(monsterId);
+        return {
+          el,
+          name: label,
+          monsterId,
+          viewHref,
+          cta: null,
+          isDead: el.classList.contains("dead"),
+          nameNode: titleNode || null,
+          actionsContainer: viewLink ? viewLink.parentElement : null,
+          instanceId: instanceId || null,
+          canLoot,
+        };
+      })
+      .filter((entry) => entry && entry.el && entry.name);
   };
 
   const waitForWaveMarkers = async () => {
@@ -111,35 +263,72 @@
     return { cards: [], markerFound: false };
   };
 
+  const waitForGuildDungeonMarkers = async () => {
+    const maxAttempts = 10;
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      const cards = collectGuildDungeonMonsters();
+      const markerFound = Boolean(cards.length);
+      if (markerFound) {
+        return { cards, markerFound };
+      }
+      await wait(150);
+    }
+    return { cards: [], markerFound: false };
+  };
+
   let warnedNoWave = false;
   let monsterCards = [];
 
   const start = async () => {
-    const { cards, markerFound } = await waitForWaveMarkers();
+    const pageType = detectPageType();
+    const { cards, markerFound } =
+      pageType === "guild_dungeon_location" ? await waitForGuildDungeonMarkers() : await waitForWaveMarkers();
     if (!markerFound) {
       if (!warnedNoWave) {
         warnedNoWave = true;
-        warn("Wave page not detected; skipping wave monster tooling.");
+        warn("Wave/dungeon page not detected; skipping monster tooling.");
       }
       return;
+    }
+
+    const isWavePage = pageType === "wave";
+    if (isWavePage) {
+      const gateInfo = document.querySelector("body > div.gate-info");
+      if (gateInfo) {
+        gateInfo.style.display = "none";
+      }
     }
 
     if (document.getElementById(MENU_ID)) {
       return;
     }
 
-    monsterCards = cards;
+    const showDead = isWavePage ? shouldShowDeadMonsters() : true;
+    monsterCards = isWavePage ? cards.map((card) => ({ ...card, isDead: showDead })) : cards;
 
-    const storageKey = `veyra-addon-wave-filters:${location.pathname}?${location.search}`;
+    const storageKey = (() => {
+      if (pageType === "guild_dungeon_location") {
+        try {
+          const url = new URL(location.href);
+          const locationId = url.searchParams.get("location_id");
+          if (locationId) {
+            return `veyra-addon-wave-filters:${location.pathname}:location_id=${locationId}`;
+          }
+        } catch (_err) {
+          // ignore
+        }
+      }
+      return `veyra-addon-wave-filters:${location.pathname}?${location.search}`;
+    })();
     const uniqueNames = Array.from(new Set(monsterCards.map((card) => card.name))).filter(Boolean);
 
     const loadSavedFilters = () => {
       try {
         const stored = localStorage.getItem(storageKey);
-        if (!stored) return null;
+        if (stored === null) return null;
         const parsed = JSON.parse(stored);
         if (!Array.isArray(parsed)) return null;
-        return new Set(parsed.filter(Boolean));
+        return parsed.filter((name) => typeof name === "string" && name.trim());
       } catch (_err) {
         return null;
       }
@@ -154,14 +343,72 @@
     };
 
     const saved = loadSavedFilters();
-    const defaultSelection = saved ? new Set([...saved].filter((name) => uniqueNames.includes(name))) : null;
+    const savedProvided = saved !== null;
+    const savedCount = savedProvided ? saved.length : 0;
+    const savedNames = savedProvided ? saved.filter((name) => uniqueNames.includes(name)) : [];
+    const selectedNames =
+      !savedProvided
+        ? new Set(uniqueNames)
+        : savedCount === 0
+          ? new Set()
+          : savedNames.length
+            ? new Set(savedNames)
+            : new Set(uniqueNames);
 
     const userId = getCookie(USER_ID_COOKIE) || getCookie("user_id");
+    const pageInstanceId = (() => {
+      if (pageType !== "guild_dungeon_location") return null;
+      try {
+        const url = new URL(location.href);
+        return url.searchParams.get("instance_id");
+      } catch (_err) {
+        return null;
+      }
+    })();
+
+    const lootedMonsterIds = new Set();
+    const monsterCounts = monsterCards.reduce((acc, card) => {
+      acc.set(card.name, (acc.get(card.name) || 0) + 1);
+      return acc;
+    }, new Map());
+
+    const aliveCounts = monsterCards.reduce((acc, card) => {
+      if (!card || !card.name) return acc;
+      if (!card.isDead) {
+        acc.set(card.name, (acc.get(card.name) || 0) + 1);
+      }
+      return acc;
+    }, new Map());
+    const formatCount = (count) => {
+      const raw = Number.isFinite(count) ? count : 0;
+      return raw < 100 ? String(raw).padStart(2, "0") : String(raw);
+    };
+
+    if (pageType === "guild_dungeon_location") {
+      monsterCards.forEach((card) => {
+        const node = card.nameNode;
+        if (!node) return;
+        if (node.querySelector(".veyra-addon-wave-alive-count")) return;
+        const alive = aliveCounts.get(card.name) || 0;
+        const total = monsterCounts.get(card.name) || 0;
+        const badge = document.createElement("span");
+        badge.className = "veyra-addon-wave-alive-count";
+        badge.textContent = `[${formatCount(alive)}/${formatCount(total)}] `;
+        const row = node.querySelector(":scope > .row") || node.querySelector(".row");
+        if (row) {
+          row.insertAdjacentElement("afterend", badge);
+        } else {
+          node.prepend(badge);
+        }
+      });
+    }
 
     const STATE = {
-      selectedNames: defaultSelection && defaultSelection.size ? defaultSelection : new Set(uniqueNames),
+      selectedNames,
       panelOpen: false,
       bulkRunning: false,
+      bulkStopRequested: false,
+      imagesVisible: true,
     };
 
     const menuRoot = document.createElement("div");
@@ -184,8 +431,52 @@
     const filterSection = document.createElement("div");
     filterSection.className = "veyra-addon-wave-section";
     const filterHeading = document.createElement("div");
-    filterHeading.className = "veyra-addon-wave-section__title";
-    filterHeading.textContent = "Filter monsters";
+    filterHeading.className = "veyra-addon-wave-section__title veyra-addon-wave-section__title--row";
+
+    const filterHeadingText = document.createElement("span");
+    filterHeadingText.className = "veyra-addon-wave-section__title-text";
+    filterHeadingText.textContent = "Filter monsters";
+
+    const filterHeadingActions = document.createElement("div");
+    filterHeadingActions.className = "veyra-addon-wave-section__actions";
+
+    const hideAllButton = document.createElement("button");
+    hideAllButton.type = "button";
+    hideAllButton.className = "veyra-addon-wave-mini-button";
+    hideAllButton.textContent = "hide all";
+    hideAllButton.disabled = !uniqueNames.length;
+
+    const showAllButton = document.createElement("button");
+    showAllButton.type = "button";
+    showAllButton.className = "veyra-addon-wave-mini-button";
+    showAllButton.textContent = "show all";
+    showAllButton.disabled = !uniqueNames.length;
+
+    hideAllButton.addEventListener("click", () => {
+      if (STATE.bulkRunning) return;
+      STATE.selectedNames.clear();
+      filterList.querySelectorAll("input[type='checkbox']").forEach((input) => {
+        input.checked = false;
+      });
+      saveFilters(STATE.selectedNames);
+      applyFilters();
+    });
+
+    showAllButton.addEventListener("click", () => {
+      if (STATE.bulkRunning) return;
+      STATE.selectedNames.clear();
+      uniqueNames.forEach((name) => STATE.selectedNames.add(name));
+      filterList.querySelectorAll("input[type='checkbox']").forEach((input) => {
+        input.checked = true;
+      });
+      saveFilters(STATE.selectedNames);
+      applyFilters();
+    });
+
+    filterHeadingActions.appendChild(hideAllButton);
+    filterHeadingActions.appendChild(showAllButton);
+    filterHeading.appendChild(filterHeadingText);
+    filterHeading.appendChild(filterHeadingActions);
     const filterList = document.createElement("div");
     filterList.id = FILTER_LIST_ID;
     filterList.className = "veyra-addon-wave-filter";
@@ -208,7 +499,7 @@
         checkbox.value = name;
 
         const optionLabel = document.createElement("span");
-        optionLabel.textContent = name;
+        optionLabel.textContent = `[${formatCount(monsterCounts.get(name) || 0)}] ${name}`;
 
         checkbox.addEventListener("change", () => {
           if (STATE.bulkRunning) {
@@ -218,10 +509,6 @@
           if (checkbox.checked) {
             STATE.selectedNames.add(name);
           } else {
-            if (STATE.selectedNames.size <= 1) {
-              checkbox.checked = true;
-              return;
-            }
             STATE.selectedNames.delete(name);
           }
           saveFilters(STATE.selectedNames);
@@ -234,13 +521,40 @@
       });
     }
 
+    const imagesToggle = document.createElement("label");
+    imagesToggle.className = "veyra-addon-wave-toggle-row";
+
+    const imagesCheckbox = document.createElement("input");
+    imagesCheckbox.type = "checkbox";
+    imagesCheckbox.checked = STATE.imagesVisible;
+    imagesCheckbox.className = "veyra-addon-wave-toggle-row__checkbox";
+    imagesCheckbox.setAttribute("aria-label", "Toggle monster images");
+    imagesCheckbox.addEventListener("change", () => {
+      if (STATE.bulkRunning) {
+        imagesCheckbox.checked = STATE.imagesVisible;
+        return;
+      }
+      STATE.imagesVisible = imagesCheckbox.checked;
+      applyImageVisibility();
+    });
+
+    const imagesText = document.createElement("span");
+    imagesText.textContent = "Show monster images";
+
+    imagesToggle.appendChild(imagesCheckbox);
+    imagesToggle.appendChild(imagesText);
+
     filterSection.appendChild(filterHeading);
     filterSection.appendChild(filterList);
+    if (isWavePage) {
+      filterSection.appendChild(imagesToggle);
+    }
     panel.appendChild(filterSection);
 
-    const showDead = shouldShowDeadMonsters();
-    let bulkInput = null;
-    let bulkButton = null;
+    let bulkCustomInput = null;
+    let bulkCustomButton = null;
+    let bulkStopButton = null;
+    const bulkQuickButtons = [];
     const bulkSection = document.createElement("div");
     bulkSection.className = "veyra-addon-wave-section";
     const bulkHeading = document.createElement("div");
@@ -251,52 +565,126 @@
 
     const bulkInfo = document.createElement("div");
     bulkInfo.className = "veyra-addon-wave-bulk__info";
-    bulkInfo.textContent = showDead
-      ? "Loots visible dead monsters in sequence."
-      : "Dead monsters hidden; bulk loot unavailable.";
+    bulkInfo.textContent = isWavePage
+      ? showDead
+        ? "Loots visible dead monsters in sequence (skips already-looted this session)."
+        : "Dead monsters hidden; bulk loot unavailable."
+      : "Loots visible dead monsters in sequence (skips already-looted this session).";
 
-    if (showDead) {
-      bulkInput = document.createElement("input");
-      bulkInput.type = "number";
-      bulkInput.min = "1";
-      bulkInput.value = String(BULK_DEFAULT_COUNT);
-      bulkInput.className = "veyra-addon-wave-bulk__input";
-      bulkInput.setAttribute("aria-label", "Number of monsters to loot");
+    const bulkLootEnabled = !isWavePage || showDead;
+    if (bulkLootEnabled) {
+      const quickRow = document.createElement("div");
+      quickRow.className = "veyra-addon-wave-bulk__quick";
 
-      bulkButton = document.createElement("button");
-      bulkButton.type = "button";
-      bulkButton.className = "veyra-addon-wave-bulk__button";
-      bulkButton.textContent = "Start bulk loot";
+      const makeQuickButton = (label, handler) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "veyra-addon-wave-bulk__button veyra-addon-wave-bulk__button--small";
+        button.textContent = label;
+        button.addEventListener("click", handler);
+        bulkQuickButtons.push(button);
+        return button;
+      };
 
-      bulkButton.addEventListener("click", async () => {
+      quickRow.appendChild(
+        makeQuickButton("1", async () => {
+          if (STATE.bulkRunning) return;
+          await runBulkLoot(1);
+        }),
+      );
+      quickRow.appendChild(
+        makeQuickButton("5", async () => {
+          if (STATE.bulkRunning) return;
+          await runBulkLoot(5);
+        }),
+      );
+      quickRow.appendChild(
+        makeQuickButton("10", async () => {
+          if (STATE.bulkRunning) return;
+          await runBulkLoot(10);
+        }),
+      );
+      quickRow.appendChild(
+        makeQuickButton("15", async () => {
+          if (STATE.bulkRunning) return;
+          await runBulkLoot(15);
+        }),
+      );
+      quickRow.appendChild(
+        makeQuickButton("all", async () => {
+          if (STATE.bulkRunning) return;
+          const ok = window.confirm("Bulk loot ALL eligible visible monsters? This may take a while.");
+          if (!ok) return;
+          await runBulkLoot(Number.POSITIVE_INFINITY);
+        }),
+      );
+
+      bulkStopButton = document.createElement("button");
+      bulkStopButton.type = "button";
+      bulkStopButton.className = "veyra-addon-wave-bulk__button veyra-addon-wave-bulk__button--stop veyra-addon-wave-bulk__button--small";
+      bulkStopButton.textContent = "Stop";
+      bulkStopButton.hidden = true;
+      bulkStopButton.disabled = true;
+      bulkStopButton.addEventListener("click", () => {
+        if (!STATE.bulkRunning) return;
+        STATE.bulkStopRequested = true;
+        bulkStopButton.disabled = true;
+        bulkStopButton.textContent = "Stopping...";
+      });
+      quickRow.appendChild(bulkStopButton);
+
+      const customRow = document.createElement("div");
+      customRow.className = "veyra-addon-wave-bulk__custom";
+
+      bulkCustomInput = document.createElement("input");
+      bulkCustomInput.type = "number";
+      bulkCustomInput.min = "1";
+      bulkCustomInput.value = String(BULK_DEFAULT_COUNT);
+      bulkCustomInput.className = "veyra-addon-wave-bulk__input";
+      bulkCustomInput.setAttribute("aria-label", "Custom monsters to loot");
+
+      bulkCustomButton = document.createElement("button");
+      bulkCustomButton.type = "button";
+      bulkCustomButton.className = "veyra-addon-wave-bulk__button veyra-addon-wave-bulk__button--small";
+      bulkCustomButton.textContent = "Loot";
+      bulkCustomButton.addEventListener("click", async () => {
         if (STATE.bulkRunning) return;
-        const desiredCount = Number.parseInt(bulkInput.value, 10);
+        const desiredCount = Number.parseInt(bulkCustomInput.value, 10);
         const runCount = Number.isFinite(desiredCount) && desiredCount > 0 ? desiredCount : BULK_DEFAULT_COUNT;
         await runBulkLoot(runCount);
       });
+      bulkCustomInput.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter") return;
+        event.preventDefault();
+        bulkCustomButton.click();
+      });
 
-      bulkControls.appendChild(bulkInput);
-      bulkControls.appendChild(bulkButton);
+      customRow.appendChild(bulkCustomInput);
+      customRow.appendChild(bulkCustomButton);
+
+      bulkControls.appendChild(quickRow);
+      bulkControls.appendChild(customRow);
     }
     bulkSection.appendChild(bulkHeading);
     bulkSection.appendChild(bulkInfo);
     bulkSection.appendChild(bulkControls);
 
-    const footerSection = document.createElement("div");
-    footerSection.className = "veyra-addon-wave-section veyra-addon-wave-section--footer";
-    const toggleDeadButton = document.createElement("button");
-    toggleDeadButton.type = "button";
-    toggleDeadButton.className = "veyra-addon-wave-bulk__button";
-    toggleDeadButton.textContent = showDead ? "🙈 Show Alive monsters" : "👁️ Show dead monsters";
-    toggleDeadButton.addEventListener("click", () => {
-      const nextValue = showDead ? "1" : "0";
-      document.cookie = `${HIDE_DEAD_COOKIE}=${nextValue}; path=/`;
-      location.reload();
-    });
-    footerSection.appendChild(toggleDeadButton);
-
     panel.appendChild(bulkSection);
-    panel.appendChild(footerSection);
+    if (isWavePage) {
+      const footerSection = document.createElement("div");
+      footerSection.className = "veyra-addon-wave-section veyra-addon-wave-section--footer";
+      const toggleDeadButton = document.createElement("button");
+      toggleDeadButton.type = "button";
+      toggleDeadButton.className = "veyra-addon-wave-bulk__button";
+      toggleDeadButton.textContent = showDead ? "🙈 Show Alive monsters" : "👁️ Show dead monsters";
+      toggleDeadButton.addEventListener("click", () => {
+        const nextValue = showDead ? "1" : "0";
+        document.cookie = `${HIDE_DEAD_COOKIE}=${nextValue}; path=/`;
+        location.reload();
+      });
+      footerSection.appendChild(toggleDeadButton);
+      panel.appendChild(footerSection);
+    }
 
   menuRoot.appendChild(toggleButton);
   menuRoot.appendChild(panel);
@@ -335,7 +723,11 @@
       STATE.panelOpen = Boolean(nextOpen);
       panel.hidden = !STATE.panelOpen;
       panel.style.display = STATE.panelOpen ? "flex" : "none";
-      toggleButton.textContent = STATE.panelOpen ? "🛠️ Wave filters and loot 🛠️" : "🛠️";
+      toggleButton.textContent = STATE.panelOpen
+        ? isWavePage
+          ? "🛠️ Wave filters and loot 🛠️"
+          : "🛠️ Monster filters and loot 🛠️"
+        : "🛠️";
       toggleButton.setAttribute("aria-expanded", STATE.panelOpen ? "true" : "false");
       toggleButton.classList.toggle("veyra-addon-wave-toggle--active", STATE.panelOpen);
       panel.dataset.open = STATE.panelOpen ? "true" : "false";
@@ -357,14 +749,14 @@
       battleDrawerToggle.addEventListener("click", () => setTimeout(syncToggleLocks, 0));
     }
 
+    const applyImageVisibility = () => {
+      if (!isWavePage) return;
+      document.querySelectorAll(".monster-img").forEach((img) => {
+        img.style.display = STATE.imagesVisible ? "" : "none";
+      });
+    };
+
     const applyFilters = () => {
-      if (!STATE.selectedNames.size) {
-        uniqueNames.forEach((name) => STATE.selectedNames.add(name));
-        filterList.querySelectorAll("input[type='checkbox']").forEach((input) => {
-          input.checked = true;
-        });
-        saveFilters(STATE.selectedNames);
-      }
       monsterCards.forEach((card) => {
         const isSelected = STATE.selectedNames.has(card.name);
         card.el.style.display = isSelected ? "" : "none";
@@ -372,14 +764,29 @@
     };
 
     applyFilters();
+    applyImageVisibility();
 
     const lockFilters = (locked) => {
       const inputs = filterList.querySelectorAll("input[type='checkbox']");
       inputs.forEach((input) => {
         input.disabled = locked;
       });
-      if (bulkInput) bulkInput.disabled = locked;
-      if (bulkButton) bulkButton.disabled = locked;
+      hideAllButton.disabled = locked || !uniqueNames.length;
+      showAllButton.disabled = locked || !uniqueNames.length;
+      imagesCheckbox.disabled = locked;
+
+      bulkQuickButtons.forEach((button) => {
+        button.disabled = locked;
+      });
+      if (bulkCustomInput) bulkCustomInput.disabled = locked;
+      if (bulkCustomButton) bulkCustomButton.disabled = locked;
+      if (bulkStopButton) {
+        bulkStopButton.hidden = !locked;
+        bulkStopButton.disabled = !locked || STATE.bulkStopRequested;
+        if (!locked) {
+          bulkStopButton.textContent = "Stop";
+        }
+      }
       panel.classList.toggle("veyra-addon-wave-panel--locked", locked);
     };
 
@@ -538,9 +945,19 @@
     progressBadge.hidden = true;
   };
 
-    const requestLoot = async (monsterId) => {
+    const requestLoot = async (monsterId, opts = {}) => {
       const url = `/loot.php`;
-      const body = `monster_id=${encodeURIComponent(monsterId)}&user_id=${encodeURIComponent(userId || "")}`;
+      const params = new URLSearchParams();
+      params.set("monster_id", String(monsterId || ""));
+      params.set("user_id", String(userId || ""));
+      if (pageType === "guild_dungeon_location") {
+        params.set("dgmid", String(monsterId || ""));
+        const instanceId = opts.instanceId || pageInstanceId;
+        if (instanceId) {
+          params.set("instance_id", String(instanceId));
+        }
+      }
+      const body = params.toString();
       const response = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -560,7 +977,7 @@
       return { raw: data || text, parsed: parseLootPayload(data || {}) };
     };
 
-    const handleSingleLoot = async (monsterId, name) => {
+    const handleSingleLoot = async (monsterId, name, opts = {}) => {
       if (!userId) {
         warn("Cannot loot: missing user id cookie");
         showModal({
@@ -572,7 +989,8 @@
         return;
       }
       try {
-        const result = await requestLoot(monsterId);
+        const result = await requestLoot(monsterId, opts);
+        lootedMonsterIds.add(String(monsterId));
         const { items, rewards, message } = result.parsed;
       showModal({
         title: "Loot acquired",
@@ -636,91 +1054,151 @@
         });
         return;
       }
-      const visibleCards = monsterCards.filter((card) => isElementVisible(card.el) && STATE.selectedNames.has(card.name));
-      if (!visibleCards.length) {
+      const eligibleCards = monsterCards
+        .map((card) => {
+          const monsterId = String(card.monsterId || extractMonsterId(card.viewHref) || "");
+          return { card, monsterId, instanceId: card.instanceId || null };
+        })
+        .filter(({ card, monsterId }) => {
+          if (!monsterId) return false;
+          if (lootedMonsterIds.has(monsterId)) return false;
+          if (!STATE.selectedNames.has(card.name)) return false;
+          if (!card.isDead) return false;
+          if (card.canLoot === false) return false;
+          return isElementVisible(card.el);
+        });
+
+      if (!eligibleCards.length) {
         showModal({
-        title: "No monsters visible",
-        subtitle: "Adjust filters to select monsters before bulk looting.",
-      });
-      return;
-    }
-
-    const targetCount = Math.min(desiredCount, visibleCards.length);
-    STATE.bulkRunning = true;
-    lockFilters(true);
-
-    const results = [];
-    let failures = 0;
-
-    for (let i = 0; i < targetCount; i += 1) {
-      const card = visibleCards[i];
-      const monsterId = card.monsterId || extractMonsterId(card.viewHref);
-      const label = card.name || `Monster ${monsterId || i + 1}`;
-      if (!monsterId) {
-        failures += 1;
-        continue;
+          title: "No eligible monsters",
+          subtitle: "Select visible monsters that have not been looted this session before bulk looting.",
+        });
+        return;
       }
-      showProgress(i + 1, targetCount);
+
+      const isAll = desiredCount === Number.POSITIVE_INFINITY;
+      const desiredNumeric = Number.parseInt(String(desiredCount), 10);
+      const requestedCount =
+        !isAll && Number.isFinite(desiredNumeric) && desiredNumeric > 0 ? desiredNumeric : BULK_DEFAULT_COUNT;
+      const targetCount = isAll ? eligibleCards.length : Math.min(requestedCount, eligibleCards.length);
+
+      STATE.bulkRunning = true;
+      STATE.bulkStopRequested = false;
+      lockFilters(true);
+
+      if (bulkStopButton) {
+        bulkStopButton.textContent = "Stop";
+        bulkStopButton.disabled = false;
+      }
+
+      const results = [];
+      let failures = 0;
+      let processed = 0;
+
       try {
-        const res = await requestLoot(monsterId);
-        results.push(res);
-      } catch (err) {
-        warn("Bulk loot failed for monster", monsterId, err);
-        failures += 1;
+        for (let i = 0; i < targetCount; i += 1) {
+          if (STATE.bulkStopRequested) break;
+
+          const { monsterId } = eligibleCards[i];
+          processed += 1;
+          showProgress(processed, targetCount);
+
+          try {
+            const { instanceId } = eligibleCards[i];
+            const res = await requestLoot(monsterId, { instanceId });
+            results.push(res);
+            lootedMonsterIds.add(monsterId);
+          } catch (err) {
+            warn("Bulk loot failed for monster", monsterId, err);
+            failures += 1;
+          }
+
+          // keep the ~500ms spacing
+          await wait(LOOT_DELAY_MS);
+        }
+      } finally {
+        hideProgress();
+        STATE.bulkRunning = false;
+        lockFilters(false);
+        setPanelOpen(true);
       }
-      // keep the ~500ms spacing
-      await wait(LOOT_DELAY_MS);
-    }
 
-    hideProgress();
-    STATE.bulkRunning = false;
-    lockFilters(false);
-    setPanelOpen(true);
+      const aggregated = aggregateLoot(results);
+      const stoppedNote = STATE.bulkStopRequested ? " (stopped)" : "";
+      showModal({
+        title: "Bulk loot summary",
+        subtitle: `Processed ${processed} monster(s)${stoppedNote}`,
+        items: aggregated.items,
+        rewards: aggregated.rewards,
+        failures,
+      });
+    };
 
-    const aggregated = aggregateLoot(results);
-    showModal({
-      title: "Bulk loot summary",
-      subtitle: `Processed ${targetCount} monster(s)`,
-      items: aggregated.items,
-      rewards: aggregated.rewards,
-      failures,
-    });
-  };
+    const addLootViewActions = (card, opts = {}) => {
+      const controls = document.createElement("div");
+      controls.className = "veyra-addon-wave-actions";
 
-    if (showDead) {
+      const lootButton = document.createElement("button");
+      lootButton.type = "button";
+      lootButton.className = "veyra-addon-wave-action veyra-addon-wave-action--loot";
+      lootButton.textContent = opts.lootLabel || "Quick loot";
+      if (opts.lootDisabled) {
+        lootButton.disabled = true;
+        lootButton.title = opts.lootDisabledReason || "Loot unavailable";
+      }
+      lootButton.addEventListener("click", (event) => {
+        if (lootButton.disabled) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const monsterId = card.monsterId || extractMonsterId(card.viewHref);
+        if (!monsterId) {
+          warn("Missing monster id for loot action");
+          return;
+        }
+        handleSingleLoot(monsterId, card.name, { instanceId: card.instanceId || null });
+      });
+
+      const viewButton = document.createElement("a");
+      viewButton.href = card.viewHref || "#";
+      viewButton.className = "veyra-addon-wave-action veyra-addon-wave-action--view";
+      viewButton.textContent = "View";
+      viewButton.target = opts.target || "_self";
+
+      controls.appendChild(lootButton);
+      controls.appendChild(viewButton);
+      return controls;
+    };
+
+    if (isWavePage && showDead) {
       monsterCards.forEach((card) => {
         if (!card.cta) return;
         const container = card.cta.parentElement;
         if (!container) return;
+        card.cta.replaceWith(addLootViewActions(card, { target: card.cta.target || "_self" }));
+      });
+    }
 
-        const controls = document.createElement("div");
-        controls.className = "veyra-addon-wave-actions";
-
-        const lootButton = document.createElement("button");
-        lootButton.type = "button";
-        lootButton.className = "veyra-addon-wave-action veyra-addon-wave-action--loot";
-        lootButton.textContent = "Quick loot";
-        lootButton.addEventListener("click", (event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          const monsterId = card.monsterId || extractMonsterId(card.viewHref);
-          if (!monsterId) {
-            warn("Missing monster id for loot action");
-            return;
-          }
-          handleSingleLoot(monsterId, card.name);
+    if (!isWavePage) {
+      monsterCards.forEach((card) => {
+        if (!card.isDead) return;
+        if (card.el.querySelector(".veyra-addon-wave-actions")) return;
+        const controls = addLootViewActions(card, {
+          lootLabel: "Loot",
+          lootDisabled: card.canLoot === false,
+          lootDisabledReason: "Cannot loot (not eligible or already looted)",
         });
-
-        const viewButton = document.createElement("a");
-        viewButton.href = card.viewHref || "#";
-        viewButton.className = "veyra-addon-wave-action veyra-addon-wave-action--view";
-        viewButton.textContent = "View";
-        viewButton.target = card.cta.target || "_self";
-
-        controls.appendChild(lootButton);
-        controls.appendChild(viewButton);
-
-        card.cta.replaceWith(controls);
+        const host = card.actionsContainer;
+        if (host) {
+          host.textContent = "";
+          host.appendChild(controls);
+        } else {
+          const detailColumn = card.el.querySelector(":scope > div");
+          if (detailColumn) {
+            detailColumn.appendChild(controls);
+          } else {
+            card.el.appendChild(controls);
+          }
+        }
       });
     }
 

@@ -26,11 +26,14 @@
       "js": ["src/content/constants.js", "src/content/wave-monster-tools.js"],
       "css": ["src/styles/wave-monster-tools.css"],
       "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://demonicscans.org/guild_dungeon_location.php*"],
+      "js": ["src/content/constants.js", "src/content/wave-monster-tools.js"],
+      "css": ["src/styles/wave-monster-tools.css"],
+      "run_at": "document_idle"
     }
   ],
-  "background": {
-    "service_worker": "src/background/service-worker.js"
-  },
   "web_accessible_resources": [
     {
       "resources": ["assets/notification.png"],

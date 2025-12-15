@@ -1,0 +1,11 @@
+## 1. Implementation
+- [x] 1.1 Hide `body > div.gate-info` on detected wave pages without affecting non-wave pages.
+- [x] 1.2 Add an images visibility checkbox to the wave tools panel that hides/shows `.monster-img` elements.
+- [x] 1.3 Add "hide all" / "show all" buttons to the Filter monsters title row and wire them to filter state + persisted selection.
+- [x] 1.4 Update filter logic to allow 0 selected monster types (hide all cards) and ensure persisted empty selections restore correctly.
+- [x] 1.5 Include per-type counts in filter option labels formatted as `[NN] Name` (2-digit pad when <100; allow wider counts for >=100).
+- [x] 1.6 Replace the bulk loot numeric input UX with quick buttons (1/5/10/15/all) and a custom count input below; require confirmation for "all" and provide a Stop control while a run is active.
+- [x] 1.7 Track monsters already looted (via single Quick loot and bulk loot) for the current page session and exclude them from subsequent bulk-loot selection so successive runs continue from remaining unlooted monsters.
+- [x] 1.8 Update `extension/src/styles/wave-monster-tools.css` for the new controls, keeping selectors scoped to `veyra-addon-*`.
+- [x] 1.9 Update `docs/README.md` with any newly observed/changed wave tooling behaviors and endpoint notes.
+- [x] 1.10 Validate specs with `openspec validate update-wave-monster-tools --strict` and fix any findings.
