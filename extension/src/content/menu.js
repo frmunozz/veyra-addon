@@ -8,10 +8,112 @@
   const NAV_FAB_ID = C.NAV_FAB_ID || "nav_fab";
   const ASIDE_BACKDROP_ID = C.ASIDE_BACKDROP_ID || "veyra-addon-aside-backdrop";
   const MENU_MOUNT_FLAG = C.MENU_MOUNT_FLAG || "veyraAddonMenuMounted";
-  const STATE = { asideBailed: false };
+  const FAVORITES_KEY = C.FAVORITES_KEY || "veyraAddonFavorites";
+  const SECTION_STATE_KEY = C.SECTION_STATE_KEY || "veyraAddonSectionState";
+  const GUILD_DASH_PATH = "/guild_dash.php";
+
+  const DEFAULT_SECTION_STATE = {
+    navigation: true,
+    shortcuts: true,
+  };
+
+  const STATE = {
+    asideBailed: false,
+    favorites: [],
+    navItems: [],
+    holeItem: null,
+    waveDropdown: buildWaveDropdown(),
+    guildDropdown: null,
+    navRoot: null,
+    aside: null,
+    navFab: null,
+    backdrop: null,
+    sectionState: loadSectionState(),
+  };
 
   const log = (...args) => console.log(TAG, ...args);
   const warn = (...args) => console.warn(TAG, ...args);
+
+  function cleanText(value) {
+    return (value || "").replace(/\s+/g, " ").trim();
+  }
+
+  function normalizeHref(href) {
+    try {
+      const url = new URL(href, location.origin);
+      return `${url.pathname}${url.search}${url.hash}`;
+    } catch (_err) {
+      return href;
+    }
+  }
+
+  function favoriteKey(item) {
+    return `${cleanText(item.label)}|${normalizeHref(item.href)}`;
+  }
+
+  function loadFavorites() {
+    try {
+      const stored = localStorage.getItem(FAVORITES_KEY);
+      if (!stored) return [];
+      const parsed = JSON.parse(stored);
+      if (!Array.isArray(parsed)) return [];
+      return parsed
+        .map((item) => {
+          const label = cleanText(item.label);
+          const href = item.href;
+          if (!label || !href) return null;
+          return {
+            label,
+            href,
+            target: item.target || "",
+            key: item.key || favoriteKey({ label, href }),
+          };
+        })
+        .filter(Boolean);
+    } catch (err) {
+      warn("Failed to read favorites; falling back to empty list.", err);
+      return [];
+    }
+  }
+
+  function persistFavorites(favorites) {
+    try {
+      localStorage.setItem(FAVORITES_KEY, JSON.stringify(favorites));
+    } catch (err) {
+      warn("Failed to persist favorites; continuing in-memory only.", err);
+    }
+  }
+
+  function setFavorites(nextFavorites) {
+    STATE.favorites = nextFavorites;
+    persistFavorites(nextFavorites);
+    renderNav();
+  }
+
+  function loadSectionState() {
+    try {
+      const stored = localStorage.getItem(SECTION_STATE_KEY);
+      if (!stored) return { ...DEFAULT_SECTION_STATE };
+      const parsed = JSON.parse(stored);
+      if (!parsed || typeof parsed !== "object") return { ...DEFAULT_SECTION_STATE };
+      return {
+        ...DEFAULT_SECTION_STATE,
+        navigation: parsed.navigation !== false,
+        shortcuts: parsed.shortcuts !== false,
+      };
+    } catch (err) {
+      warn("Failed to read section state; using defaults.", err);
+      return { ...DEFAULT_SECTION_STATE };
+    }
+  }
+
+  function persistSectionState(state) {
+    try {
+      localStorage.setItem(SECTION_STATE_KEY, JSON.stringify(state));
+    } catch (err) {
+      warn("Failed to persist section state; continuing in-memory only.", err);
+    }
+  }
 
   function extractNavItems(container) {
     const anchors = Array.from(container.querySelectorAll("a[href]"));
@@ -19,11 +121,11 @@
 
     return anchors
       .map((anchor) => {
-        const label = (anchor.textContent || "").replace(/\s+/g, " ").trim();
+        const label = cleanText(anchor.textContent);
         const href = anchor.getAttribute("href");
         if (!label || !href) return null;
         const target = anchor.getAttribute("target") || "";
-        return { label, href, target };
+        return { label, href, target, key: favoriteKey({ label, href }) };
       })
       .filter(Boolean)
       .filter((item) => {
@@ -66,7 +168,7 @@
     return setAsideCollapsed(aside, nextCollapsed, toggle, backdrop);
   }
 
-  function buildAddonAside(navItems, startCollapsed = true, backdrop) {
+  function buildAddonAside(startCollapsed = true, backdrop) {
     const aside = document.createElement("aside");
     aside.id = ASIDE_ID;
     aside.className = "veyra-addon-aside";
@@ -76,7 +178,13 @@
 
     const title = document.createElement("span");
     title.className = "veyra-addon-aside__title";
-    title.textContent = "Veyra Addon Menu";
+
+    const home = document.createElement("a");
+    home.className = "veyra-addon-home";
+    home.href = "/game_dash.php";
+    home.textContent = "Home";
+    home.setAttribute("aria-label", "Go to home");
+    title.appendChild(home);
 
     const toggle = document.createElement("button");
     toggle.type = "button";
@@ -88,35 +196,23 @@
     const nav = document.createElement("nav");
     nav.className = "veyra-addon-aside__nav";
 
-    const list = document.createElement("ul");
-    list.className = "veyra-addon-aside__list";
-
-    navItems.forEach((item) => {
-      const li = document.createElement("li");
-      li.className = "veyra-addon-aside__item";
-
-      const link = document.createElement("a");
-      link.className = "veyra-addon-aside__link";
-      link.href = item.href;
-      link.textContent = item.label;
-      if (item.target) {
-        link.target = item.target;
-      }
-
-      li.appendChild(link);
-      list.appendChild(li);
-    });
-
-    nav.appendChild(list);
+    const sections = document.createElement("div");
+    sections.className = "veyra-addon-aside__sections";
+    nav.appendChild(sections);
     header.appendChild(title);
     header.appendChild(toggle);
     aside.appendChild(header);
     aside.appendChild(nav);
 
+    const footer = document.createElement("div");
+    footer.className = "veyra-addon-aside__footer";
+    footer.textContent = "Veyra addon Menu";
+    aside.appendChild(footer);
+
     toggle.addEventListener("click", () => toggleAsideCollapsed(aside, toggle, backdrop));
     setAsideCollapsed(aside, startCollapsed, toggle, backdrop);
 
-    return aside;
+    return { aside, sections, toggle };
   }
 
   function hideNativeDrawer(nativeDrawer) {
@@ -127,10 +223,9 @@
     nativeDrawer.style.pointerEvents = "none";
   }
 
-  function wireNavFabToggle(aside, backdrop) {
-    const navFab = document.getElementById(NAV_FAB_ID);
+  function wireNavFabToggle(aside, toggle, navFab, backdrop) {
     if (!navFab) return null;
-    const headerToggle = aside.querySelector(`#${ASIDE_TOGGLE_ID}`);
+    const headerToggle = aside.querySelector(`#${ASIDE_TOGGLE_ID}`) || toggle;
 
     const handler = (event) => {
       event.preventDefault();
@@ -148,16 +243,516 @@
     return navFab;
   }
 
+  function dedupeItems(items) {
+    const seen = new Set();
+    return items.filter((item) => {
+      const key = favoriteKey(item);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }
+
+  function isDecorative(item) {
+    const label = cleanText(item.label).toLowerCase();
+    return label.includes("side-title") || label.includes("side title") || label.includes("halloween");
+  }
+
+  function splitHole(items) {
+    let hole = null;
+    const rest = [];
+    items.forEach((item) => {
+      const label = cleanText(item.label).toLowerCase();
+      const isHole = label === "hole" || item.href?.toLowerCase().includes("hole.php");
+      if (!hole && isHole) {
+        hole = { ...item, key: favoriteKey(item) };
+        return;
+      }
+      rest.push(item);
+    });
+    return { hole, rest };
+  }
+
+  function ensureStaticLinks(items) {
+    const entries = [
+      { label: "Legendary Forge", href: "/legendary_forge.php", icon: "✨" },
+      { label: "Adventurers Guild", href: "/adventurers_guild.php", icon: "🏤" },
+    ];
+    const keys = new Set(items.map((item) => favoriteKey(item)));
+
+    entries.forEach((entry) => {
+      const key = favoriteKey(entry);
+      if (!keys.has(key)) {
+        items.push({ ...entry, key });
+      }
+    });
+
+    return items;
+  }
+
+  function createNavItem(label, href, target = "", extra = {}) {
+    const cleanedLabel = cleanText(label);
+    const cleanHref = href || "";
+    return {
+      label: cleanedLabel,
+      href: cleanHref,
+      target,
+      icon: extra.icon,
+      key: extra.key || favoriteKey({ label: cleanedLabel, href: cleanHref }),
+    };
+  }
+
+  function buildWaveDropdown() {
+    return {
+      type: "dropdown",
+      key: "grakthar-waves",
+      label: "Grakthar Gate Waves",
+      icon: "🌊",
+      isOpen: false,
+      items: [
+        createNavItem("Grakthar - Wave 3", "/active_wave.php?gate=3&wave=8", "", {
+          key: favoriteKey({ label: "Wave 3", href: "/active_wave.php?gate=3&wave=8" }),
+          icon: "🌊",
+        }),
+        createNavItem("Grakthar - Wave 2", "/active_wave.php?gate=3&wave=5", "", {
+          key: favoriteKey({ label: "Wave 2", href: "/active_wave.php?gate=3&wave=5" }),
+          icon: "🌊",
+        }),
+        createNavItem("Grakthar - Wave 1", "/active_wave.php?gate=3&wave=3", "", {
+          key: favoriteKey({ label: "Wave 1", href: "/active_wave.php?gate=3&wave=3" }),
+          icon: "🌊",
+        }),
+      ],
+    };
+  }
+
+  function buildCatalog() {
+    const catalog = new Map();
+    const addItem = (item) => {
+      if (!item || !item.key) return;
+      if (item.type === "empty") return;
+      if (!catalog.has(item.key)) {
+        catalog.set(item.key, item);
+      }
+    };
+
+    if (STATE.holeItem) addItem(STATE.holeItem);
+    STATE.navItems.forEach(addItem);
+    STATE.waveDropdown.items.forEach(addItem);
+    if (STATE.guildDropdown?.items) {
+      STATE.guildDropdown.items.forEach(addItem);
+    }
+    return catalog;
+  }
+
+  function buildSection(title, options = {}) {
+    const section = document.createElement("section");
+    section.className = "veyra-addon-section";
+    const list = document.createElement("ul");
+    list.className = "veyra-addon-aside__list";
+
+    if (title) {
+      const isCollapsible = Boolean(options.collapsibleKey);
+      const heading = document.createElement(isCollapsible ? "button" : "div");
+      heading.className = "veyra-addon-section__title";
+      if (isCollapsible) {
+        heading.classList.add("veyra-addon-section__title-button");
+        heading.type = "button";
+        const listId = `veyra-addon-${options.collapsibleKey}-list`;
+        list.id = listId;
+        heading.setAttribute("aria-controls", listId);
+        let isOpen = STATE.sectionState[options.collapsibleKey] !== false;
+
+        const titleSpan = document.createElement("span");
+        titleSpan.textContent = title;
+        const chevron = document.createElement("span");
+        chevron.className = "veyra-addon-section__chevron";
+
+        const applyVisibility = () => {
+          section.classList.toggle("veyra-addon-section--collapsed", !isOpen);
+          list.hidden = !isOpen;
+          heading.setAttribute("aria-expanded", String(isOpen));
+          chevron.textContent = isOpen ? "▾" : "▸";
+        };
+
+        heading.appendChild(titleSpan);
+        heading.appendChild(chevron);
+        applyVisibility();
+
+        heading.addEventListener("click", () => {
+          isOpen = !isOpen;
+          STATE.sectionState[options.collapsibleKey] = isOpen;
+          persistSectionState(STATE.sectionState);
+          applyVisibility();
+        });
+      } else {
+        heading.textContent = title;
+      }
+
+      section.appendChild(heading);
+    }
+
+    section.appendChild(list);
+    return { section, list };
+  }
+
+  function createStarButton(item, isActive) {
+    const star = document.createElement("button");
+    star.type = "button";
+    star.className = `veyra-addon-star ${isActive ? "veyra-addon-star--active" : ""}`;
+    star.setAttribute("aria-pressed", String(Boolean(isActive)));
+    star.setAttribute(
+      "aria-label",
+      isActive ? `Remove ${item.label} from favorites` : `Add ${item.label} to favorites`
+    );
+    star.textContent = isActive ? "★" : "☆";
+    star.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+
+      const key = item.key || favoriteKey(item);
+      const existingIndex = STATE.favorites.findIndex((fav) => fav.key === key);
+      if (existingIndex >= 0) {
+        const nextFavorites = [...STATE.favorites.slice(0, existingIndex), ...STATE.favorites.slice(existingIndex + 1)];
+        setFavorites(nextFavorites);
+      } else {
+        const nextFavorites = [...STATE.favorites, { ...item, key }];
+        setFavorites(nextFavorites);
+      }
+    });
+    return star;
+  }
+
+  function createLinkRow(item, favoriteKeys, options = {}) {
+    const li = document.createElement("li");
+    li.className = "veyra-addon-aside__item";
+
+    const row = document.createElement("div");
+    row.className = "veyra-addon-row";
+
+    const isFavorited = favoriteKeys.has(item.key);
+    const disabled = options.disabled;
+    if (disabled) {
+      row.classList.add("veyra-addon-row--muted");
+    }
+
+    const link = document.createElement(options.asSpan ? "span" : "a");
+    link.className = "veyra-addon-aside__link";
+    const label = document.createElement("span");
+    label.className = "veyra-addon-aside__label";
+    if (item.icon) {
+      const icon = document.createElement("span");
+      icon.className = "veyra-addon-icon";
+      icon.textContent = item.icon;
+      label.appendChild(icon);
+    }
+    label.appendChild(document.createTextNode(item.label));
+    link.appendChild(label);
+    if (!options.asSpan) {
+      link.href = item.href;
+      if (item.target) {
+        link.target = item.target;
+      }
+    }
+    if (disabled) {
+      link.setAttribute("aria-disabled", "true");
+    }
+
+    row.appendChild(link);
+
+    if (!disabled && !options.hideStar) {
+      const star = createStarButton(item, isFavorited);
+      row.appendChild(star);
+    }
+
+    li.appendChild(row);
+    return li;
+  }
+
+  function renderFavoritesSection(catalog) {
+    const favoriteKeys = new Set(STATE.favorites.map((fav) => fav.key));
+    const { section, list } = buildSection("Favorites");
+
+    if (!STATE.favorites.length) {
+      const empty = document.createElement("li");
+      empty.className = "veyra-addon-aside__item veyra-addon-aside__item--empty";
+      empty.textContent = "Star any menu item to pin it here.";
+      list.appendChild(empty);
+      return { section, favoriteKeys };
+    }
+
+    STATE.favorites.forEach((fav) => {
+      const item = catalog.get(fav.key) || fav;
+      list.appendChild(createLinkRow(item, favoriteKeys));
+    });
+
+    return { section, favoriteKeys };
+  }
+
+  function renderLinkGroup(title, items, favoriteKeys, options = {}) {
+    if (!items.length) return null;
+    const { section, list } = buildSection(title, options);
+    items.forEach((item) => {
+      list.appendChild(createLinkRow(item, favoriteKeys));
+    });
+    return section;
+  }
+
+  function renderDropdown(dropdown, favoriteKeys) {
+    const wrapper = document.createElement("li");
+    wrapper.className = "veyra-addon-dropdown";
+
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "veyra-addon-dropdown__toggle";
+    toggle.setAttribute("aria-expanded", String(Boolean(dropdown.isOpen)));
+    const label = document.createElement("span");
+    label.className = "veyra-addon-dropdown__label";
+    if (dropdown.icon) {
+      const icon = document.createElement("span");
+      icon.className = "veyra-addon-icon";
+      icon.textContent = dropdown.icon;
+      label.appendChild(icon);
+    }
+    label.appendChild(document.createTextNode(dropdown.label));
+    toggle.appendChild(label);
+
+    const chevron = document.createElement("span");
+    chevron.className = "veyra-addon-dropdown__chevron";
+    chevron.setAttribute("aria-hidden", "true");
+    chevron.textContent = dropdown.isOpen ? "▾" : "▸";
+    toggle.appendChild(chevron);
+
+    const list = document.createElement("ul");
+    list.className = "veyra-addon-dropdown__list";
+    list.hidden = !dropdown.isOpen;
+
+    const dropdownItems = dropdown.items || [];
+
+    if (!dropdownItems.length) {
+      const empty = document.createElement("li");
+      empty.className = "veyra-addon-aside__item veyra-addon-aside__item--empty";
+      empty.textContent = "No items available.";
+      list.appendChild(empty);
+    } else {
+      dropdownItems.forEach((item) => {
+        if (item.type === "empty") {
+          list.appendChild(createLinkRow(item, favoriteKeys, { asSpan: true, disabled: true, hideStar: true }));
+        } else {
+          list.appendChild(createLinkRow(item, favoriteKeys));
+        }
+      });
+    }
+
+    toggle.addEventListener("click", () => {
+      dropdown.isOpen = !dropdown.isOpen;
+      list.hidden = !dropdown.isOpen;
+      toggle.setAttribute("aria-expanded", String(Boolean(dropdown.isOpen)));
+      chevron.textContent = dropdown.isOpen ? "▾" : "▸";
+    });
+
+    wrapper.appendChild(toggle);
+    wrapper.appendChild(list);
+    return wrapper;
+  }
+
+  function renderNav() {
+    if (!STATE.navRoot) return;
+    STATE.navRoot.innerHTML = "";
+
+    const catalog = buildCatalog();
+    const { section: favoritesSection, favoriteKeys } = renderFavoritesSection(catalog);
+    STATE.navRoot.appendChild(favoritesSection);
+
+    if (STATE.holeItem) {
+      const holeSection = renderLinkGroup("Hole", [STATE.holeItem], favoriteKeys);
+      if (holeSection) {
+        holeSection.classList.add("veyra-addon-section--spaced");
+        STATE.navRoot.appendChild(holeSection);
+      }
+    }
+
+    const mainSection = renderLinkGroup("Navigation", STATE.navItems, favoriteKeys, { collapsibleKey: "navigation" });
+    if (mainSection) {
+      STATE.navRoot.appendChild(mainSection);
+    }
+
+    const dropdowns = [STATE.waveDropdown, STATE.guildDropdown].filter(Boolean);
+    if (dropdowns.length) {
+      const dropdownSection = buildSection("Shortcuts", { collapsibleKey: "shortcuts" });
+      dropdowns.forEach((dropdown) => {
+        dropdownSection.list.appendChild(renderDropdown(dropdown, favoriteKeys));
+      });
+      STATE.navRoot.appendChild(dropdownSection.section);
+    }
+  }
+
+  function parseDungeonName(link) {
+    const scopes = [link.closest(".card"), link.closest(".panel"), link.closest(".card-body"), link.parentElement].filter(
+      Boolean
+    );
+
+    for (const scope of scopes) {
+      const nameNode = scope.querySelector("h1, h2, h3, h4, h5, .card-title, .title, .dungeon-name, strong");
+      const name = cleanText(nameNode?.textContent || "");
+      if (name) return name;
+    }
+
+    let cursor = link.previousElementSibling;
+    while (cursor) {
+      const name = cleanText(cursor.textContent || "");
+      if (name) return name;
+      cursor = cursor.previousElementSibling;
+    }
+
+    return cleanText(link.textContent || "");
+  }
+
+  function extractDungeonNamesFromSelectors(doc) {
+    const selectors = [
+      "body > div.wrap > div:nth-child(6) > div:nth-child(1) > div > div:nth-child(1) > div:nth-child(2)",
+      "body > div.wrap > div:nth-child(6) > div:nth-child(1) > div > div:nth-child(2) > div:nth-child(2)",
+    ];
+
+    return selectors
+      .map((selector) => {
+        const node = doc.querySelector(selector);
+        return cleanText(node?.textContent || "");
+      })
+      .filter(Boolean);
+  }
+
+  function parseOpenDungeons(html) {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, "text/html");
+    const headings = Array.from(doc.querySelectorAll("h2"));
+    const heading = headings.find((node) => cleanText(node.textContent).toLowerCase() === "open dungeons");
+    if (!heading) {
+      return { items: null, missing: true };
+    }
+
+    const region = document.createElement("div");
+    let cursor = heading.nextElementSibling;
+    while (cursor && cursor.tagName !== "H2") {
+      region.appendChild(cursor.cloneNode(true));
+      cursor = cursor.nextElementSibling;
+    }
+
+    const links = Array.from(region.querySelectorAll("a[href*='guild_dungeon_instance']"));
+    const nameHints = extractDungeonNamesFromSelectors(doc);
+    const entries = links
+      .map((link, index) => {
+        const href = link.getAttribute("href");
+        const hintedName = nameHints[index];
+        const name = hintedName || parseDungeonName(link);
+        if (!href || !name) return null;
+        return createNavItem(name, href, link.getAttribute("target") || "", { icon: "🧌" });
+      })
+      .filter(Boolean);
+
+    return { items: dedupeItems(entries), missing: false };
+  }
+
+  function syncDungeonFavorites(latestItems) {
+    if (!Array.isArray(latestItems) || !latestItems.length || !STATE.favorites.length) return;
+    const latestByLabel = new Map();
+    latestItems.forEach((item) => {
+      const label = cleanText(item.label).toLowerCase();
+      if (label) latestByLabel.set(label, item);
+    });
+
+    let changed = false;
+    const seen = new Set();
+    const nextFavorites = [];
+
+    STATE.favorites.forEach((fav) => {
+      let nextFav = fav;
+      const isDungeon = fav.href?.includes("guild_dungeon_instance");
+      if (isDungeon) {
+        const match = latestByLabel.get(cleanText(fav.label).toLowerCase());
+        if (match && match.href !== fav.href) {
+          nextFav = {
+            ...fav,
+            href: match.href,
+            target: match.target || fav.target || "",
+            key: favoriteKey({ label: fav.label, href: match.href }),
+          };
+          changed = true;
+        }
+      }
+
+      if (!seen.has(nextFav.key)) {
+        seen.add(nextFav.key);
+        nextFavorites.push(nextFav);
+      }
+    });
+
+    if (changed) {
+      setFavorites(nextFavorites);
+    }
+  }
+
+  async function loadGuildDungeons() {
+    try {
+      const response = await fetch(GUILD_DASH_PATH, { credentials: "include" });
+      if (!response.ok) {
+        warn(`Guild dungeons fetch failed with status ${response.status}; skipping dropdown.`);
+        return;
+      }
+      const html = await response.text();
+      const parsed = parseOpenDungeons(html);
+      if (parsed.missing) {
+        warn("Open Dungeons section not found; skipping Guild Dungeons dropdown.");
+        return;
+      }
+
+      if (!parsed.items || !parsed.items.length) {
+        STATE.guildDropdown = {
+          type: "dropdown",
+          key: "guild-dungeons",
+          label: "Guild Dungeons",
+          icon: "🧌",
+          isOpen: false,
+          items: [{ type: "empty", label: "No open dungeons", key: "guild-dungeons-empty" }],
+        };
+        renderNav();
+        return;
+      }
+
+      STATE.guildDropdown = {
+        type: "dropdown",
+        key: "guild-dungeons",
+        label: "Guild Dungeons",
+        icon: "🧌",
+        isOpen: false,
+        items: parsed.items,
+      };
+      syncDungeonFavorites(parsed.items);
+      renderNav();
+    } catch (err) {
+      warn("Guild dungeons fetch threw; skipping dropdown.", err);
+    }
+  }
+
+  function prepareNavItems(rawNavItems) {
+    const filtered = dedupeItems(rawNavItems.filter((item) => !isDecorative(item)));
+    const { hole, rest } = splitHole(filtered);
+    const withStatic = ensureStaticLinks(rest);
+    STATE.navItems = withStatic.map((item) => ({ ...item, key: favoriteKey(item) }));
+    STATE.holeItem = hole;
+  }
+
   function initAddonAside() {
     if (document.getElementById(ASIDE_ID)) {
       return true;
     }
 
     const nativeDrawer = document.getElementById(NATIVE_DRAWER_ID);
-    if (!nativeDrawer) {
+    const navFab = document.getElementById(NAV_FAB_ID);
+    if (!nativeDrawer || !navFab) {
       if (!STATE.asideBailed) {
         STATE.asideBailed = true;
-        warn("Native side drawer not found; addon aside disabled and page menu left intact.");
+        warn("Native drawer or nav toggle not found; addon aside disabled and native drawer left intact.");
       }
       return false;
     }
@@ -172,26 +767,31 @@
         return false;
       }
 
+      prepareNavItems(navItems);
+      STATE.favorites = loadFavorites();
+
       const backdrop = ensureAddonBackdrop();
-      const navFab = document.getElementById(NAV_FAB_ID);
+      const { aside, sections, toggle } = buildAddonAside(true, backdrop);
+      STATE.aside = aside;
+      STATE.navRoot = sections;
+      STATE.navFab = navFab;
+      STATE.backdrop = backdrop;
+
       backdrop.addEventListener("click", () => {
-        const asideEl = document.getElementById(ASIDE_ID);
-        if (!asideEl) return;
-        const headerToggle = asideEl.querySelector(`#${ASIDE_TOGGLE_ID}`);
-        setAsideCollapsed(asideEl, true, headerToggle, backdrop);
-        if (navFab) {
-          navFab.setAttribute("aria-pressed", "false");
-          navFab.setAttribute("aria-expanded", "false");
-        }
+        const headerToggle = document.getElementById(ASIDE_TOGGLE_ID);
+        setAsideCollapsed(STATE.aside, true, headerToggle, backdrop);
+        navFab.setAttribute("aria-pressed", "false");
+        navFab.setAttribute("aria-expanded", "false");
       });
 
-      const aside = buildAddonAside(navItems, Boolean(navFab), backdrop);
       document.body.appendChild(aside);
-      const boundFab = wireNavFabToggle(aside, backdrop);
+      const boundFab = wireNavFabToggle(aside, toggle, navFab, backdrop);
       if (!boundFab) {
         warn("nav_fab button not found; using header toggle instead.");
       }
+
       hideNativeDrawer(nativeDrawer);
+      renderNav();
       return true;
     } catch (err) {
       if (!STATE.asideBailed) {
@@ -200,6 +800,10 @@
       }
       return false;
     }
+  }
+
+  async function initGuildDungeonsDropdown() {
+    await loadGuildDungeons();
   }
 
   function getEnabledFlag() {
@@ -237,7 +841,9 @@
       }
 
       document.documentElement.dataset[MENU_MOUNT_FLAG] = "true";
-      initAddonAside();
+      const mounted = initAddonAside();
+      if (!mounted) return;
+      initGuildDungeonsDropdown();
     });
   }
 

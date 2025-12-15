@@ -86,7 +86,7 @@ function computeDelayMinutes(progress) {
   const target = progress.target || TARGET_THRESHOLD;
 
   if (current < 2000) return POLL_MINUTES.low;
-  if (current < 2400) return POLL_MINUTES.mid;
+  if (current < 2300) return POLL_MINUTES.mid;
   if (current < target) return POLL_MINUTES.high;
   return POLL_MINUTES.high;
 }

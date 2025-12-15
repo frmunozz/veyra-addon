@@ -4,7 +4,9 @@
   "description": "Minimal helper layer for the Veyra web game on demonicscans.org.",
   "version": "0.0.1",
   "icons": {
-    "128": "assets/notification.png"
+    "16": "assets/icon16.png",
+    "48": "assets/icon48.png",
+    "128": "assets/icon128.png"
   },
   "action": {
     "default_title": "Veyra Addon",
@@ -17,6 +19,12 @@
       "matches": ["https://demonicscans.org/*"],
       "js": ["src/content/constants.js", "src/content/menu.js"],
       "css": ["src/styles/menu.css"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://demonicscans.org/active_wave.php*"],
+      "js": ["src/content/constants.js", "src/content/wave-monster-tools.js"],
+      "css": ["src/styles/wave-monster-tools.css"],
       "run_at": "document_idle"
     }
   ],
