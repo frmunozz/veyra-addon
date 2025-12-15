@@ -11,6 +11,8 @@
   const FAVORITES_KEY = C.FAVORITES_KEY || "veyraAddonFavorites";
   const SECTION_STATE_KEY = C.SECTION_STATE_KEY || "veyraAddonSectionState";
   const GUILD_DASH_PATH = "/guild_dash.php";
+  const WINTER_FESTIVAL_PATH = "/a_lizardmen_winter.php";
+  const WINTER_PROGRESS_REFRESH_MS = 5 * 60 * 1000;
 
   const DEFAULT_SECTION_STATE = {
     navigation: true,
@@ -23,7 +25,11 @@
     navItems: [],
     holeItem: null,
     waveDropdown: buildWaveDropdown(),
-    guildDropdown: null,
+    guildDropdown: buildGuildDungeonsDropdown(),
+    winterDropdown: buildWinterAuroraDropdown("Loading..."),
+    winterProgressTimer: null,
+    winterProgressInFlight: false,
+    winterProgressLastUpdatedAt: 0,
     navRoot: null,
     aside: null,
     navFab: null,
@@ -182,7 +188,7 @@
     const home = document.createElement("a");
     home.className = "veyra-addon-home";
     home.href = "/game_dash.php";
-    home.textContent = "Home";
+    home.textContent = "🏠";
     home.setAttribute("aria-label", "Go to home");
     title.appendChild(home);
 
@@ -326,6 +332,41 @@
     };
   }
 
+  function buildGuildDungeonsDropdown(
+    items = [{ type: "empty", label: "Loading...", key: "guild-dungeons-loading" }],
+    isOpen = false
+  ) {
+    return {
+      type: "dropdown",
+      key: "guild-dungeons",
+      label: "Guild Dungeons",
+      icon: "🧌",
+      isOpen,
+      items,
+    };
+  }
+
+  function buildWinterAuroraDropdown(progressLabel, isOpen = false) {
+    return {
+      type: "dropdown",
+      key: "winter-aurora-festival",
+      label: "Winter Aurora Festival",
+      icon: "🎄",
+      subLabel: progressLabel,
+      isOpen,
+      items: [
+        createNavItem("Festival Page", WINTER_FESTIVAL_PATH, "", {
+          icon: "🎄",
+          key: favoriteKey({ label: "Winter Aurora Festival", href: WINTER_FESTIVAL_PATH }),
+        }),
+        createNavItem("Carols in the Cold", "/active_wave.php?event=4&wave=2", "", {
+          icon: "🌊",
+          key: favoriteKey({ label: "Carols in the Cold", href: "/active_wave.php?event=4&wave=2" }),
+        }),
+      ],
+    };
+  }
+
   function buildCatalog() {
     const catalog = new Map();
     const addItem = (item) => {
@@ -341,6 +382,9 @@
     STATE.waveDropdown.items.forEach(addItem);
     if (STATE.guildDropdown?.items) {
       STATE.guildDropdown.items.forEach(addItem);
+    }
+    if (STATE.winterDropdown?.items) {
+      STATE.winterDropdown.items.forEach(addItem);
     }
     return catalog;
   }
@@ -508,13 +552,22 @@
     toggle.setAttribute("aria-expanded", String(Boolean(dropdown.isOpen)));
     const label = document.createElement("span");
     label.className = "veyra-addon-dropdown__label";
+    const main = document.createElement("span");
+    main.className = "veyra-addon-dropdown__label-main";
     if (dropdown.icon) {
       const icon = document.createElement("span");
       icon.className = "veyra-addon-icon";
       icon.textContent = dropdown.icon;
-      label.appendChild(icon);
+      main.appendChild(icon);
     }
-    label.appendChild(document.createTextNode(dropdown.label));
+    main.appendChild(document.createTextNode(dropdown.label));
+    label.appendChild(main);
+    if (dropdown.subLabel) {
+      const subLabel = document.createElement("span");
+      subLabel.className = "veyra-addon-dropdown__sublabel";
+      subLabel.textContent = dropdown.subLabel;
+      label.appendChild(subLabel);
+    }
     toggle.appendChild(label);
 
     const chevron = document.createElement("span");
@@ -562,22 +615,8 @@
 
     const catalog = buildCatalog();
     const { section: favoritesSection, favoriteKeys } = renderFavoritesSection(catalog);
-    STATE.navRoot.appendChild(favoritesSection);
 
-    if (STATE.holeItem) {
-      const holeSection = renderLinkGroup("Hole", [STATE.holeItem], favoriteKeys);
-      if (holeSection) {
-        holeSection.classList.add("veyra-addon-section--spaced");
-        STATE.navRoot.appendChild(holeSection);
-      }
-    }
-
-    const mainSection = renderLinkGroup("Navigation", STATE.navItems, favoriteKeys, { collapsibleKey: "navigation" });
-    if (mainSection) {
-      STATE.navRoot.appendChild(mainSection);
-    }
-
-    const dropdowns = [STATE.waveDropdown, STATE.guildDropdown].filter(Boolean);
+    const dropdowns = [STATE.waveDropdown, STATE.guildDropdown, STATE.winterDropdown].filter(Boolean);
     if (dropdowns.length) {
       const dropdownSection = buildSection("Shortcuts", { collapsibleKey: "shortcuts" });
       dropdowns.forEach((dropdown) => {
@@ -585,6 +624,121 @@
       });
       STATE.navRoot.appendChild(dropdownSection.section);
     }
+
+    STATE.navRoot.appendChild(favoritesSection);
+
+    const hasNavigation = Boolean(STATE.navItems.length || STATE.holeItem);
+    if (hasNavigation) {
+      const navigation = buildSection("Navigation", { collapsibleKey: "navigation" });
+      STATE.navItems.forEach((item) => {
+        navigation.list.appendChild(createLinkRow(item, favoriteKeys));
+      });
+
+      if (STATE.holeItem) {
+        const separator = document.createElement("li");
+        separator.className = "veyra-addon-aside__separator";
+        separator.setAttribute("aria-hidden", "true");
+        navigation.list.appendChild(separator);
+        navigation.list.appendChild(createLinkRow(STATE.holeItem, favoriteKeys));
+      }
+
+      STATE.navRoot.appendChild(navigation.section);
+    }
+  }
+
+  function parseNumberFromText(value, { pick = "first" } = {}) {
+    const matches = (value || "").match(/[\d,]+/g);
+    if (!matches || !matches.length) return null;
+    const raw = pick === "last" ? matches[matches.length - 1] : matches[0];
+    const parsed = Number(raw.replace(/,/g, ""));
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  function formatCount(value) {
+    if (!Number.isFinite(value)) return "—";
+    return new Intl.NumberFormat("en-US").format(value);
+  }
+
+  function parseWinterProgress(html) {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, "text/html");
+    const currentNode = doc.querySelector(
+      "body > div.wrap > div:nth-child(3) > div > div:nth-child(1) > div:nth-child(5) > div:nth-child(1)"
+    );
+    const goalNode = doc.querySelector(
+      "body > div.wrap > div:nth-child(3) > div > div:nth-child(1) > div:nth-child(5) > div:nth-child(2)"
+    );
+
+    const currentText = cleanText(currentNode?.textContent || "");
+    const goalText = cleanText(goalNode?.textContent || "");
+
+    const current = parseNumberFromText(currentText, { pick: "first" });
+    const goal = parseNumberFromText(goalText, { pick: "last" });
+    if (!Number.isFinite(current) || !Number.isFinite(goal)) {
+      return null;
+    }
+    return { current, goal };
+  }
+
+  async function loadWinterProgress() {
+    if (STATE.winterProgressInFlight) return;
+    STATE.winterProgressInFlight = true;
+    STATE.winterProgressLastUpdatedAt = Date.now();
+
+    try {
+      const response = await fetch(WINTER_FESTIVAL_PATH, { credentials: "include" });
+      if (!response.ok) {
+        warn(`Winter Aurora Festival fetch failed with status ${response.status}; leaving fallback progress.`);
+        if (STATE.winterDropdown?.subLabel !== "—/—") {
+          STATE.winterDropdown = buildWinterAuroraDropdown("—/—", Boolean(STATE.winterDropdown?.isOpen));
+          renderNav();
+        }
+        return;
+      }
+
+      const html = await response.text();
+      const parsed = parseWinterProgress(html);
+      if (!parsed) {
+        warn("Winter Aurora Festival progress parse failed; leaving fallback progress.");
+        if (STATE.winterDropdown?.subLabel !== "—/—") {
+          STATE.winterDropdown = buildWinterAuroraDropdown("—/—", Boolean(STATE.winterDropdown?.isOpen));
+          renderNav();
+        }
+        return;
+      }
+
+      const nextLabel = `${formatCount(parsed.current)}/${formatCount(parsed.goal)}`;
+      if (STATE.winterDropdown?.subLabel !== nextLabel) {
+        STATE.winterDropdown = buildWinterAuroraDropdown(nextLabel, Boolean(STATE.winterDropdown?.isOpen));
+        renderNav();
+      }
+    } catch (err) {
+      warn("Winter Aurora Festival fetch threw; leaving fallback progress.", err);
+      if (STATE.winterDropdown?.subLabel !== "—/—") {
+        STATE.winterDropdown = buildWinterAuroraDropdown("—/—", Boolean(STATE.winterDropdown?.isOpen));
+        renderNav();
+      }
+    } finally {
+      STATE.winterProgressInFlight = false;
+    }
+  }
+
+  function startWinterProgressRefresh() {
+    if (STATE.winterProgressTimer) return;
+    if (!document.getElementById(ASIDE_ID)) return;
+
+    loadWinterProgress();
+    STATE.winterProgressTimer = window.setInterval(() => {
+      if (!document.getElementById(ASIDE_ID)) {
+        window.clearInterval(STATE.winterProgressTimer);
+        STATE.winterProgressTimer = null;
+        return;
+      }
+
+      const elapsed = Date.now() - STATE.winterProgressLastUpdatedAt;
+      if (elapsed < WINTER_PROGRESS_REFRESH_MS) return;
+      loadWinterProgress();
+    }, WINTER_PROGRESS_REFRESH_MS);
   }
 
   function parseDungeonName(link) {
@@ -693,44 +847,50 @@
   }
 
   async function loadGuildDungeons() {
+    if (!STATE.guildDropdown) {
+      STATE.guildDropdown = buildGuildDungeonsDropdown(undefined, false);
+      renderNav();
+    }
+
     try {
       const response = await fetch(GUILD_DASH_PATH, { credentials: "include" });
       if (!response.ok) {
-        warn(`Guild dungeons fetch failed with status ${response.status}; skipping dropdown.`);
-        return;
-      }
-      const html = await response.text();
-      const parsed = parseOpenDungeons(html);
-      if (parsed.missing) {
-        warn("Open Dungeons section not found; skipping Guild Dungeons dropdown.");
-        return;
-      }
-
-      if (!parsed.items || !parsed.items.length) {
-        STATE.guildDropdown = {
-          type: "dropdown",
-          key: "guild-dungeons",
-          label: "Guild Dungeons",
-          icon: "🧌",
-          isOpen: false,
-          items: [{ type: "empty", label: "No open dungeons", key: "guild-dungeons-empty" }],
-        };
+        warn(`Guild dungeons fetch failed with status ${response.status}; showing error state.`);
+        STATE.guildDropdown = buildGuildDungeonsDropdown([
+          { type: "empty", label: "Failed to load guild dungeons", key: "guild-dungeons-error" },
+        ], Boolean(STATE.guildDropdown?.isOpen));
         renderNav();
         return;
       }
 
-      STATE.guildDropdown = {
-        type: "dropdown",
-        key: "guild-dungeons",
-        label: "Guild Dungeons",
-        icon: "🧌",
-        isOpen: false,
-        items: parsed.items,
-      };
+      const html = await response.text();
+      const parsed = parseOpenDungeons(html);
+      if (parsed.missing) {
+        warn("Open Dungeons section not found; showing error state.");
+        STATE.guildDropdown = buildGuildDungeonsDropdown([
+          { type: "empty", label: "Failed to load guild dungeons", key: "guild-dungeons-error" },
+        ], Boolean(STATE.guildDropdown?.isOpen));
+        renderNav();
+        return;
+      }
+
+      if (!parsed.items || !parsed.items.length) {
+        STATE.guildDropdown = buildGuildDungeonsDropdown([
+          { type: "empty", label: "No open dungeons", key: "guild-dungeons-empty" },
+        ], Boolean(STATE.guildDropdown?.isOpen));
+        renderNav();
+        return;
+      }
+
+      STATE.guildDropdown = buildGuildDungeonsDropdown(parsed.items, Boolean(STATE.guildDropdown?.isOpen));
       syncDungeonFavorites(parsed.items);
       renderNav();
     } catch (err) {
-      warn("Guild dungeons fetch threw; skipping dropdown.", err);
+      warn("Guild dungeons fetch threw; showing error state.", err);
+      STATE.guildDropdown = buildGuildDungeonsDropdown([
+        { type: "empty", label: "Failed to load guild dungeons", key: "guild-dungeons-error" },
+      ], Boolean(STATE.guildDropdown?.isOpen));
+      renderNav();
     }
   }
 
@@ -844,6 +1004,7 @@
       const mounted = initAddonAside();
       if (!mounted) return;
       initGuildDungeonsDropdown();
+      startWinterProgressRefresh();
     });
   }
 
