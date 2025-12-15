@@ -12,6 +12,14 @@
   const USER_ID_COOKIE = "demon";
   const BULK_DEFAULT_COUNT = 5;
   const LOOT_DELAY_MS = 520;
+  const DATASET_NAME_KEY = "veyraAddonMonsterName";
+  const DATASET_ID_KEY = "veyraAddonMonsterId";
+  const GUILD_MONSTER_CONTAINER_SELECTORS = [
+    "body > div.wrap > div.grid > div:nth-child(1) > div:nth-child(2)",
+    "body > div.wrap > div.grid > div:nth-child(1)",
+    "body > div.wrap > div.grid",
+    "body > div.wrap",
+  ];
   const WAVE_WHITELIST = [
     "/active_wave.php?gate=3&wave=3",
     "/active_wave.php?gate=3&wave=5",
@@ -23,6 +31,13 @@
 
   const cleanText = (value) => (value || "").replace(/\s+/g, " ").trim();
   const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  const detectPageType = () => {
+    const path = String(location.pathname || "");
+    if (path.endsWith("/active_wave.php")) return "wave";
+    if (path.endsWith("/guild_dungeon_location.php")) return "guild_dungeon_location";
+    return "unknown";
+  };
 
   const getCookie = (name) => {
     const cookies = document.cookie ? document.cookie.split(";") : [];
@@ -45,10 +60,81 @@
     if (!href) return null;
     try {
       const url = new URL(href, location.origin);
-      return url.searchParams.get("id") || url.searchParams.get("monster_id");
+      return (
+        url.searchParams.get("id") ||
+        url.searchParams.get("monster_id") ||
+        url.searchParams.get("monsterId") ||
+        url.searchParams.get("enemy_id") ||
+        url.searchParams.get("dgmid") ||
+        url.searchParams.get("dgmId")
+      );
     } catch (_err) {
       return null;
     }
+  };
+
+  const extractInstanceId = (href) => {
+    if (!href) return null;
+    try {
+      const url = new URL(href, location.origin);
+      return url.searchParams.get("instance_id") || url.searchParams.get("instanceId");
+    } catch (_err) {
+      return null;
+    }
+  };
+
+  const extractMonsterIdFromInputs = (root) => {
+    if (!root) return null;
+    const candidate =
+      root.querySelector("input[name='monster_id']") ||
+      root.querySelector("input[name='monsterId']") ||
+      root.querySelector("input[name='id']") ||
+      root.querySelector("input[name='enemy_id']");
+    const value = candidate ? cleanText(candidate.value) : "";
+    return value || null;
+  };
+
+  const extractMonsterIdFromLinks = (root) => {
+    if (!root) return null;
+    const links = Array.from(root.querySelectorAll("a[href]"))
+      .map((a) => a.getAttribute("href"))
+      .filter(Boolean);
+    for (const href of links) {
+      const id = extractMonsterId(href);
+      if (id) return id;
+    }
+    return null;
+  };
+
+  const pickViewHref = (root, monsterId) => {
+    if (!root) return "";
+    const links = Array.from(root.querySelectorAll("a[href]"))
+      .map((a) => a.getAttribute("href"))
+      .filter((href) => href && !href.startsWith("#") && !href.startsWith("javascript:"));
+    if (!links.length) return "";
+    if (monsterId) {
+      const exact = links.find((href) => String(extractMonsterId(href) || "") === String(monsterId));
+      if (exact) return exact;
+    }
+    return links[0] || "";
+  };
+
+  const findGuildMonsterContainer = () => {
+    for (const selector of GUILD_MONSTER_CONTAINER_SELECTORS) {
+      const node = document.querySelector(selector);
+      if (!node) continue;
+      if (node.querySelector(".mon")) return node;
+    }
+    return null;
+  };
+
+  const extractGuildMonsterName = (titleNode) => {
+    if (!titleNode) return "";
+    const clone = titleNode.cloneNode(true);
+    clone.querySelectorAll(".row, .pill, .veyra-addon-wave-alive-count, .veyra-addon-wave-actions").forEach((n) => {
+      n.remove();
+    });
+    return cleanText(clone.textContent);
   };
 
   const isWhitelistedWaveUrl = () => {
@@ -69,12 +155,17 @@
     );
     return cards
       .map((el) => {
+        const storedName = cleanText(el.dataset && el.dataset[DATASET_NAME_KEY]);
         const nameNode = el.querySelector("h3") || el.querySelector("strong");
         const name =
+          storedName ||
           cleanText(nameNode ? nameNode.textContent : "") ||
           cleanText(el.getAttribute("data-name")) ||
           cleanText(el.dataset && el.dataset.name) ||
           "";
+        if (!storedName && name) {
+          el.dataset[DATASET_NAME_KEY] = name;
+        }
         const cta =
           el.querySelector("a[href*='battle.php']") ||
           el.querySelector(":scope > div:nth-child(2) > a[href]") ||
@@ -92,9 +183,70 @@
           cta,
           viewHref,
           monsterId,
+          isDead: false,
         };
       })
-      .filter((entry) => entry && entry.el && entry.monsterId);
+      .filter((entry) => entry && entry.el && entry.name);
+  };
+
+  const collectGuildDungeonMonsters = () => {
+    const container = findGuildMonsterContainer();
+    if (!container) return [];
+
+    const cards = Array.from(container.querySelectorAll("div.mon"));
+    return cards
+      .map((el) => {
+        const storedName = cleanText(el.dataset && el.dataset[DATASET_NAME_KEY]);
+        const detailColumn = el.querySelector(":scope > div");
+        const titleNode = detailColumn ? detailColumn.querySelector(":scope > div") : null;
+
+        let name = storedName || extractGuildMonsterName(titleNode);
+        if (!name) {
+          const img = el.querySelector("img[alt]");
+          name = cleanText(img ? img.getAttribute("alt") : "");
+        }
+
+        if (!storedName && name) {
+          el.dataset[DATASET_NAME_KEY] = name;
+        }
+
+        const storedMonsterId = cleanText(el.dataset && el.dataset[DATASET_ID_KEY]);
+        const viewLink =
+          el.querySelector("a.btn[href*='battle.php']") ||
+          el.querySelector("a[href*='battle.php']") ||
+          el.querySelector("a.btn[href]") ||
+          el.querySelector("a[href]");
+        const viewHref = viewLink ? viewLink.getAttribute("href") : "";
+        const instanceId = extractInstanceId(viewHref);
+
+        const monsterId =
+          storedMonsterId ||
+          el.getAttribute("data-monster-id") ||
+          (el.dataset && (el.dataset.monsterId || el.dataset.monster_id || el.dataset.id)) ||
+          extractMonsterIdFromInputs(el) ||
+          extractMonsterId(viewHref) ||
+          extractMonsterIdFromLinks(el);
+
+        if (!storedMonsterId && monsterId) {
+          el.dataset[DATASET_ID_KEY] = monsterId;
+        }
+
+        const label = name || (monsterId ? `Monster ${monsterId}` : "Unknown");
+        const canLoot = Boolean(el.querySelector(".pill-warn")) && Boolean(monsterId);
+        return {
+          el,
+          name: label,
+          monsterId,
+          viewHref,
+          cta: null,
+          isDead: el.classList.contains("dead"),
+          nameNode: titleNode || null,
+          actionsContainer: viewLink ? viewLink.parentElement : null,
+          instanceId: instanceId || null,
+          canLoot,
+        };
+      })
+      .filter((entry) => entry && entry.el && entry.name);
   };
 
   const waitForWaveMarkers = async () => {
@@ -111,31 +263,63 @@
     return { cards: [], markerFound: false };
   };
 
+  const waitForGuildDungeonMarkers = async () => {
+    const maxAttempts = 10;
+    for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+      const cards = collectGuildDungeonMonsters();
+      const markerFound = Boolean(cards.length);
+      if (markerFound) {
+        return { cards, markerFound };
+      }
+      await wait(150);
+    }
+    return { cards: [], markerFound: false };
+  };
+
   let warnedNoWave = false;
   let monsterCards = [];
 
   const start = async () => {
-    const { cards, markerFound } = await waitForWaveMarkers();
+    const pageType = detectPageType();
+    const { cards, markerFound } =
+      pageType === "guild_dungeon_location" ? await waitForGuildDungeonMarkers() : await waitForWaveMarkers();
     if (!markerFound) {
       if (!warnedNoWave) {
         warnedNoWave = true;
-        warn("Wave page not detected; skipping wave monster tooling.");
+        warn("Wave/dungeon page not detected; skipping monster tooling.");
       }
       return;
     }
 
-    const gateInfo = document.querySelector("body > div.gate-info");
-    if (gateInfo) {
-      gateInfo.style.display = "none";
+    const isWavePage = pageType === "wave";
+    if (isWavePage) {
+      const gateInfo = document.querySelector("body > div.gate-info");
+      if (gateInfo) {
+        gateInfo.style.display = "none";
+      }
     }
 
     if (document.getElementById(MENU_ID)) {
       return;
     }
 
-    monsterCards = cards;
+    const showDead = isWavePage ? shouldShowDeadMonsters() : true;
+    monsterCards = isWavePage ? cards.map((card) => ({ ...card, isDead: showDead })) : cards;
 
-    const storageKey = `veyra-addon-wave-filters:${location.pathname}?${location.search}`;
+    const storageKey = (() => {
+      if (pageType === "guild_dungeon_location") {
+        try {
+          const url = new URL(location.href);
+          const locationId = url.searchParams.get("location_id");
+          if (locationId) {
+            return `veyra-addon-wave-filters:${location.pathname}:location_id=${locationId}`;
+          }
+        } catch (_err) {
+          // ignore
+        }
+      }
+      return `veyra-addon-wave-filters:${location.pathname}?${location.search}`;
+    })();
     const uniqueNames = Array.from(new Set(monsterCards.map((card) => card.name))).filter(Boolean);
 
     const loadSavedFilters = () => {
@@ -172,16 +356,52 @@
             : new Set(uniqueNames);
 
     const userId = getCookie(USER_ID_COOKIE) || getCookie("user_id");
+    const pageInstanceId = (() => {
+      if (pageType !== "guild_dungeon_location") return null;
+      try {
+        const url = new URL(location.href);
+        return url.searchParams.get("instance_id");
+      } catch (_err) {
+        return null;
+      }
+    })();
 
     const lootedMonsterIds = new Set();
     const monsterCounts = monsterCards.reduce((acc, card) => {
       acc.set(card.name, (acc.get(card.name) || 0) + 1);
       return acc;
     }, new Map());
+
+    const aliveCounts = monsterCards.reduce((acc, card) => {
+      if (!card || !card.name) return acc;
+      if (!card.isDead) {
+        acc.set(card.name, (acc.get(card.name) || 0) + 1);
+      }
+      return acc;
+    }, new Map());
     const formatCount = (count) => {
       const raw = Number.isFinite(count) ? count : 0;
       return raw < 100 ? String(raw).padStart(2, "0") : String(raw);
     };
+
+    if (pageType === "guild_dungeon_location") {
+      monsterCards.forEach((card) => {
+        const node = card.nameNode;
+        if (!node) return;
+        if (node.querySelector(".veyra-addon-wave-alive-count")) return;
+        const alive = aliveCounts.get(card.name) || 0;
+        const total = monsterCounts.get(card.name) || 0;
+        const badge = document.createElement("span");
+        badge.className = "veyra-addon-wave-alive-count";
+        badge.textContent = `[${formatCount(alive)}/${formatCount(total)}] `;
+        const row = node.querySelector(":scope > .row") || node.querySelector(".row");
+        if (row) {
+          row.insertAdjacentElement("afterend", badge);
+        } else {
+          node.prepend(badge);
+        }
+      });
+    }
 
     const STATE = {
       selectedNames,
@@ -326,10 +546,11 @@
 
     filterSection.appendChild(filterHeading);
     filterSection.appendChild(filterList);
-    filterSection.appendChild(imagesToggle);
+    if (isWavePage) {
+      filterSection.appendChild(imagesToggle);
+    }
     panel.appendChild(filterSection);
 
-    const showDead = shouldShowDeadMonsters();
     let bulkCustomInput = null;
     let bulkCustomButton = null;
     let bulkStopButton = null;
@@ -344,11 +565,14 @@
 
     const bulkInfo = document.createElement("div");
     bulkInfo.className = "veyra-addon-wave-bulk__info";
-    bulkInfo.textContent = showDead
-      ? "Loots visible dead monsters in sequence (skips already-looted this session)."
-      : "Dead monsters hidden; bulk loot unavailable.";
+    bulkInfo.textContent = isWavePage
+      ? showDead
+        ? "Loots visible dead monsters in sequence (skips already-looted this session)."
+        : "Dead monsters hidden; bulk loot unavailable."
+      : "Loots visible dead monsters in sequence (skips already-looted this session).";
 
-    if (showDead) {
+    const bulkLootEnabled = !isWavePage || showDead;
+    if (bulkLootEnabled) {
       const quickRow = document.createElement("div");
       quickRow.className = "veyra-addon-wave-bulk__quick";
 
@@ -445,21 +669,22 @@
     bulkSection.appendChild(bulkInfo);
     bulkSection.appendChild(bulkControls);
 
-    const footerSection = document.createElement("div");
-    footerSection.className = "veyra-addon-wave-section veyra-addon-wave-section--footer";
-    const toggleDeadButton = document.createElement("button");
-    toggleDeadButton.type = "button";
-    toggleDeadButton.className = "veyra-addon-wave-bulk__button";
-    toggleDeadButton.textContent = showDead ? "🙈 Show Alive monsters" : "👁️ Show dead monsters";
-    toggleDeadButton.addEventListener("click", () => {
-      const nextValue = showDead ? "1" : "0";
-      document.cookie = `${HIDE_DEAD_COOKIE}=${nextValue}; path=/`;
-      location.reload();
-    });
-    footerSection.appendChild(toggleDeadButton);
-
     panel.appendChild(bulkSection);
-    panel.appendChild(footerSection);
+    if (isWavePage) {
+      const footerSection = document.createElement("div");
+      footerSection.className = "veyra-addon-wave-section veyra-addon-wave-section--footer";
+      const toggleDeadButton = document.createElement("button");
+      toggleDeadButton.type = "button";
+      toggleDeadButton.className = "veyra-addon-wave-bulk__button";
+      toggleDeadButton.textContent = showDead ? "🙈 Show Alive monsters" : "👁️ Show dead monsters";
+      toggleDeadButton.addEventListener("click", () => {
+        const nextValue = showDead ? "1" : "0";
+        document.cookie = `${HIDE_DEAD_COOKIE}=${nextValue}; path=/`;
+        location.reload();
+      });
+      footerSection.appendChild(toggleDeadButton);
+      panel.appendChild(footerSection);
+    }
 
   menuRoot.appendChild(toggleButton);
   menuRoot.appendChild(panel);
@@ -498,7 +723,11 @@
       STATE.panelOpen = Boolean(nextOpen);
       panel.hidden = !STATE.panelOpen;
       panel.style.display = STATE.panelOpen ? "flex" : "none";
-      toggleButton.textContent = STATE.panelOpen ? "🛠️ Wave filters and loot 🛠️" : "🛠️";
+      toggleButton.textContent = STATE.panelOpen
+        ? isWavePage
+          ? "🛠️ Wave filters and loot 🛠️"
+          : "🛠️ Monster filters and loot 🛠️"
+        : "🛠️";
       toggleButton.setAttribute("aria-expanded", STATE.panelOpen ? "true" : "false");
       toggleButton.classList.toggle("veyra-addon-wave-toggle--active", STATE.panelOpen);
       panel.dataset.open = STATE.panelOpen ? "true" : "false";
@@ -521,6 +750,7 @@
     }
 
     const applyImageVisibility = () => {
+      if (!isWavePage) return;
       document.querySelectorAll(".monster-img").forEach((img) => {
         img.style.display = STATE.imagesVisible ? "" : "none";
       });
@@ -715,9 +945,19 @@
     progressBadge.hidden = true;
   };
 
-    const requestLoot = async (monsterId) => {
+    const requestLoot = async (monsterId, opts = {}) => {
       const url = `/loot.php`;
-      const body = `monster_id=${encodeURIComponent(monsterId)}&user_id=${encodeURIComponent(userId || "")}`;
+      const params = new URLSearchParams();
+      params.set("monster_id", String(monsterId || ""));
+      params.set("user_id", String(userId || ""));
+      if (pageType === "guild_dungeon_location") {
+        params.set("dgmid", String(monsterId || ""));
+        const instanceId = opts.instanceId || pageInstanceId;
+        if (instanceId) {
+          params.set("instance_id", String(instanceId));
+        }
+      }
+      const body = params.toString();
       const response = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -737,7 +977,7 @@
       return { raw: data || text, parsed: parseLootPayload(data || {}) };
     };
 
-    const handleSingleLoot = async (monsterId, name) => {
+    const handleSingleLoot = async (monsterId, name, opts = {}) => {
       if (!userId) {
         warn("Cannot loot: missing user id cookie");
         showModal({
@@ -749,7 +989,7 @@
         return;
       }
       try {
-        const result = await requestLoot(monsterId);
+        const result = await requestLoot(monsterId, opts);
         lootedMonsterIds.add(String(monsterId));
         const { items, rewards, message } = result.parsed;
       showModal({
@@ -817,12 +1057,14 @@
       const eligibleCards = monsterCards
         .map((card) => {
           const monsterId = String(card.monsterId || extractMonsterId(card.viewHref) || "");
-          return { card, monsterId };
+          return { card, monsterId, instanceId: card.instanceId || null };
         })
         .filter(({ card, monsterId }) => {
           if (!monsterId) return false;
           if (lootedMonsterIds.has(monsterId)) return false;
           if (!STATE.selectedNames.has(card.name)) return false;
+          if (!card.isDead) return false;
+          if (card.canLoot === false) return false;
           return isElementVisible(card.el);
         });
 
@@ -862,7 +1104,8 @@
           showProgress(processed, targetCount);
 
           try {
-            const res = await requestLoot(monsterId);
+            const { instanceId } = eligibleCards[i];
+            const res = await requestLoot(monsterId, { instanceId });
             results.push(res);
             lootedMonsterIds.add(monsterId);
           } catch (err) {
@@ -891,40 +1134,71 @@
       });
     };
 
-    if (showDead) {
+    const addLootViewActions = (card, opts = {}) => {
+      const controls = document.createElement("div");
+      controls.className = "veyra-addon-wave-actions";
+
+      const lootButton = document.createElement("button");
+      lootButton.type = "button";
+      lootButton.className = "veyra-addon-wave-action veyra-addon-wave-action--loot";
+      lootButton.textContent = opts.lootLabel || "Quick loot";
+      if (opts.lootDisabled) {
+        lootButton.disabled = true;
+        lootButton.title = opts.lootDisabledReason || "Loot unavailable";
+      }
+      lootButton.addEventListener("click", (event) => {
+        if (lootButton.disabled) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const monsterId = card.monsterId || extractMonsterId(card.viewHref);
+        if (!monsterId) {
+          warn("Missing monster id for loot action");
+          return;
+        }
+        handleSingleLoot(monsterId, card.name, { instanceId: card.instanceId || null });
+      });
+
+      const viewButton = document.createElement("a");
+      viewButton.href = card.viewHref || "#";
+      viewButton.className = "veyra-addon-wave-action veyra-addon-wave-action--view";
+      viewButton.textContent = "View";
+      viewButton.target = opts.target || "_self";
+
+      controls.appendChild(lootButton);
+      controls.appendChild(viewButton);
+      return controls;
+    };
+
+    if (isWavePage && showDead) {
       monsterCards.forEach((card) => {
         if (!card.cta) return;
         const container = card.cta.parentElement;
         if (!container) return;
+        card.cta.replaceWith(addLootViewActions(card, { target: card.cta.target || "_self" }));
+      });
+    }
 
-        const controls = document.createElement("div");
-        controls.className = "veyra-addon-wave-actions";
-
-        const lootButton = document.createElement("button");
-        lootButton.type = "button";
-        lootButton.className = "veyra-addon-wave-action veyra-addon-wave-action--loot";
-        lootButton.textContent = "Quick loot";
-        lootButton.addEventListener("click", (event) => {
-          event.preventDefault();
-          event.stopPropagation();
-          const monsterId = card.monsterId || extractMonsterId(card.viewHref);
-          if (!monsterId) {
-            warn("Missing monster id for loot action");
-            return;
-          }
-          handleSingleLoot(monsterId, card.name);
+    if (!isWavePage) {
+      monsterCards.forEach((card) => {
+        if (!card.isDead) return;
+        if (card.el.querySelector(".veyra-addon-wave-actions")) return;
+        const controls = addLootViewActions(card, {
+          lootLabel: "Loot",
+          lootDisabled: card.canLoot === false,
+          lootDisabledReason: "Cannot loot (not eligible or already looted)",
         });
-
-        const viewButton = document.createElement("a");
-        viewButton.href = card.viewHref || "#";
-        viewButton.className = "veyra-addon-wave-action veyra-addon-wave-action--view";
-        viewButton.textContent = "View";
-        viewButton.target = card.cta.target || "_self";
-
-        controls.appendChild(lootButton);
-        controls.appendChild(viewButton);
-
-        card.cta.replaceWith(controls);
+        const host = card.actionsContainer;
+        if (host) {
+          host.textContent = "";
+          host.appendChild(controls);
+        } else {
+          const detailColumn = card.el.querySelector(":scope > div");
+          if (detailColumn) {
+            detailColumn.appendChild(controls);
+          } else {
+            card.el.appendChild(controls);
+          }
+        }
       });
     }
 

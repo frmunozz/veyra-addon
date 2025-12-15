@@ -26,6 +26,12 @@
       "js": ["src/content/constants.js", "src/content/wave-monster-tools.js"],
       "css": ["src/styles/wave-monster-tools.css"],
       "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://demonicscans.org/guild_dungeon_location.php*"],
+      "js": ["src/content/constants.js", "src/content/wave-monster-tools.js"],
+      "css": ["src/styles/wave-monster-tools.css"],
+      "run_at": "document_idle"
     }
   ],
   "web_accessible_resources": [

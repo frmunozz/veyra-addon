@@ -471,3 +471,16 @@
   outline: none;
   border-color: rgba(255, 255, 255, 0.28);
 }
+
+.veyra-addon-wave-action:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  box-shadow: none;
+  transform: none;
+}
+
+.veyra-addon-wave-alive-count {
+  font-variant-numeric: tabular-nums;
+  color: #9fb5d8;
+  font-weight: 800;
+}
