@@ -12,6 +12,12 @@
   const USER_ID_COOKIE = "demon";
   const BULK_DEFAULT_COUNT = 5;
   const LOOT_DELAY_MS = 520;
+  const AUTOMATION_STORAGE_PREFIX = "veyra-addon-wave-automation";
+  const WAVE_QOL_PANEL_ID = "waveQolPanel";
+  const WAVE_QOL_SELECT_ID = "fNameSel";
+  const WAVE_QOL_UNJOINED_ID = "fUnjoined";
+  const WAVE_QOL_SELECT_VISIBLE_ID = "btnSelectVisible";
+  const WAVE_QOL_ATTACK_SELECTOR = "#waveQolPanel > div.qol-top > div.qol-attacks > button:nth-child(3)";
   const DATASET_NAME_KEY = "veyraAddonMonsterName";
   const DATASET_ID_KEY = "veyraAddonMonsterId";
   const GUILD_MONSTER_CONTAINER_SELECTORS = [
@@ -28,6 +34,7 @@
 
   const log = (...args) => console.log(TAG, ...args);
   const warn = (...args) => console.warn(TAG, ...args);
+  const error = (...args) => console.error(TAG, ...args);
 
   const cleanText = (value) => (value || "").replace(/\s+/g, " ").trim();
   const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -103,6 +110,22 @@
       const id = extractMonsterId(href);
       if (id) return id;
     }
+    return null;
+  };
+
+  const extractGuildUserId = () => {
+    const healButton =
+      document.getElementById("healBtn") || document.querySelector("button[onclick*='healDungeonPlayer']");
+    if (!healButton) return null;
+    const handler = healButton.getAttribute("onclick") || "";
+    const match = handler.match(/healDungeonPlayer\([^,]+,\s*(\d+)/);
+    return match ? match[1] : null;
+  };
+
+  const resolveUserId = (pageType) => {
+    const fromCookie = getCookie(USER_ID_COOKIE) || getCookie("user_id");
+    if (fromCookie) return fromCookie;
+    if (pageType === "guild_dungeon_location") return extractGuildUserId();
     return null;
   };
 
@@ -352,10 +375,10 @@
         : savedCount === 0
           ? new Set()
           : savedNames.length
-            ? new Set(savedNames)
-            : new Set(uniqueNames);
+          ? new Set(savedNames)
+          : new Set(uniqueNames);
 
-    const userId = getCookie(USER_ID_COOKIE) || getCookie("user_id");
+    const userId = resolveUserId(pageType);
     const pageInstanceId = (() => {
       if (pageType !== "guild_dungeon_location") return null;
       try {
@@ -670,6 +693,251 @@
     bulkSection.appendChild(bulkControls);
 
     panel.appendChild(bulkSection);
+
+    const buildWaveAutomationKey = () => {
+      if (!isWavePage) return null;
+      try {
+        const url = new URL(location.href);
+        const wave = url.searchParams.get("wave");
+        const event = url.searchParams.get("event");
+        const gate = url.searchParams.get("gate");
+        if (wave && (event || gate)) {
+          const mode =
+            event && Number.parseInt(event, 10) > 0 ? `event=${event}` : `gate=${gate || "0"}`;
+          return `${AUTOMATION_STORAGE_PREFIX}:${mode}&wave=${wave}`;
+        }
+      } catch (_err) {
+        // ignore
+      }
+      return `${AUTOMATION_STORAGE_PREFIX}:${location.pathname}?${location.search}`;
+    };
+
+    const buildAutomationOptions = () => {
+      const options = new Map();
+      monsterCards.forEach((card) => {
+        if (!card || !card.el) return;
+        const rawValue = cleanText(card.el.getAttribute("data-name") || card.el.dataset?.name || "");
+        const value = rawValue || cleanText(card.name).toLowerCase();
+        if (!value) return;
+        const label = cleanText(card.name) || value;
+        if (!options.has(value)) {
+          options.set(value, label);
+        }
+      });
+      return Array.from(options.entries()).sort((a, b) => a[1].localeCompare(b[1]));
+    };
+
+    const setupWaveAutomation = () => {
+      if (!isWavePage) return null;
+      const hasQolPanel = Boolean(document.getElementById(WAVE_QOL_PANEL_ID));
+      const hasQolSelect = Boolean(document.getElementById(WAVE_QOL_SELECT_ID));
+      if (!hasQolPanel || !hasQolSelect) return null;
+
+      const storageKey = buildWaveAutomationKey();
+      const loadState = () => {
+        if (!storageKey) return { enabled: false, selection: "" };
+        try {
+          const raw = localStorage.getItem(storageKey);
+          if (!raw) return { enabled: false, selection: "" };
+          const parsed = JSON.parse(raw);
+          return {
+            enabled: Boolean(parsed && parsed.enabled),
+            selection: typeof parsed?.selection === "string" ? parsed.selection : "",
+          };
+        } catch (_err) {
+          return { enabled: false, selection: "" };
+        }
+      };
+      const saveState = (nextState) => {
+        if (!storageKey) return;
+        try {
+          localStorage.setItem(storageKey, JSON.stringify(nextState));
+        } catch (_err) {
+          // ignore storage failures
+        }
+      };
+
+      const state = loadState();
+      let ran = false;
+
+      const section = document.createElement("div");
+      section.className = "veyra-addon-wave-section veyra-addon-wave-automation";
+
+      const heading = document.createElement("div");
+      heading.className = "veyra-addon-wave-section__title";
+      heading.textContent = "Wave automation";
+
+      const body = document.createElement("div");
+      body.className = "veyra-addon-wave-automation__body";
+
+      const selectRow = document.createElement("div");
+      selectRow.className = "veyra-addon-wave-automation__row";
+      const selectLabel = document.createElement("span");
+      selectLabel.className = "veyra-addon-wave-automation__label";
+      selectLabel.textContent = "Monster";
+
+      const select = document.createElement("select");
+      select.className = "veyra-addon-wave-automation__select";
+      select.setAttribute("aria-label", "Wave automation monster");
+
+      const defaultOption = document.createElement("option");
+      defaultOption.value = "";
+      defaultOption.textContent = "Select a monster";
+      select.appendChild(defaultOption);
+
+      const options = buildAutomationOptions();
+      options.forEach(([value, label]) => {
+        const option = document.createElement("option");
+        option.value = value;
+        option.textContent = label;
+        select.appendChild(option);
+      });
+
+      selectRow.appendChild(selectLabel);
+      selectRow.appendChild(select);
+
+      const actions = document.createElement("div");
+      actions.className = "veyra-addon-wave-automation__actions";
+      const toggle = document.createElement("button");
+      toggle.type = "button";
+      toggle.className = "veyra-addon-wave-automation__button";
+      actions.appendChild(toggle);
+
+      const status = document.createElement("div");
+      status.className = "veyra-addon-wave-automation__status";
+
+      const setStatus = (message, stateClass = "idle") => {
+        status.textContent = message;
+        status.dataset.state = stateClass;
+      };
+
+      const selectionExists = (value) =>
+        Array.from(select.options).some((option) => option.value === value);
+
+      if (state.selection && selectionExists(state.selection)) {
+        select.value = state.selection;
+      } else {
+        select.value = "";
+      }
+
+      const updateToggleLabel = () => {
+        toggle.textContent = state.enabled ? "Disable" : "Enable";
+        toggle.classList.toggle("veyra-addon-wave-automation__button--active", state.enabled);
+      };
+
+      const announceState = () => {
+        const selectedLabel = select.options[select.selectedIndex]?.textContent?.trim() || "Select a monster";
+        if (state.enabled) {
+          setStatus(`Enabled for "${selectedLabel}". Reload to run.`, "ready");
+        } else {
+          setStatus("Disabled.", "idle");
+        }
+      };
+
+      updateToggleLabel();
+      announceState();
+
+      select.addEventListener("change", () => {
+        state.selection = select.value;
+        saveState(state);
+        if (state.enabled) {
+          announceState();
+        }
+      });
+
+      toggle.addEventListener("click", () => {
+        if (!state.enabled) {
+          if (!select.value) {
+            setStatus("Select a monster before enabling.", "error");
+            return;
+          }
+          state.selection = select.value;
+          state.enabled = true;
+          saveState(state);
+          updateToggleLabel();
+          announceState();
+          return;
+        }
+
+        state.enabled = false;
+        saveState(state);
+        updateToggleLabel();
+        announceState();
+      });
+
+      body.appendChild(selectRow);
+      body.appendChild(actions);
+      body.appendChild(status);
+
+      section.appendChild(heading);
+      section.appendChild(body);
+      panel.appendChild(section);
+
+      const failStep = (step, selector, detail) => {
+        const message = `Automation failed at ${step}: ${selector}. ${detail}`;
+        setStatus(message, "error");
+        error("Wave automation failed:", step, selector, detail);
+      };
+
+      const run = () => {
+        if (!state.enabled || ran) return;
+        ran = true;
+
+        const selectionValue = state.selection;
+        if (!selectionValue) {
+          failStep("select-monster", `#${WAVE_QOL_SELECT_ID}`, "No stored selection.");
+          return;
+        }
+
+        const nameSelect = document.getElementById(WAVE_QOL_SELECT_ID);
+        if (!nameSelect) {
+          failStep("select-monster", `#${WAVE_QOL_SELECT_ID}`, "Select element missing.");
+          return;
+        }
+
+        const optionFound = Array.from(nameSelect.options).some((opt) => opt.value === selectionValue);
+        if (!optionFound) {
+          failStep("select-monster", `#${WAVE_QOL_SELECT_ID}`, `Option "${selectionValue}" not found.`);
+          return;
+        }
+
+        setStatus("Running automation...", "running");
+        nameSelect.value = selectionValue;
+        nameSelect.dispatchEvent(new Event("change", { bubbles: true }));
+        nameSelect.dispatchEvent(new Event("input", { bubbles: true }));
+
+        const unjoinedToggle = document.getElementById(WAVE_QOL_UNJOINED_ID);
+        if (!unjoinedToggle) {
+          failStep("toggle-unjoined", `#${WAVE_QOL_UNJOINED_ID}`, "Checkbox missing.");
+          return;
+        }
+
+        unjoinedToggle.checked = false;
+        unjoinedToggle.dispatchEvent(new Event("change", { bubbles: true }));
+        unjoinedToggle.checked = true;
+        unjoinedToggle.dispatchEvent(new Event("change", { bubbles: true }));
+
+        const selectVisible = document.getElementById(WAVE_QOL_SELECT_VISIBLE_ID);
+        if (!selectVisible) {
+          failStep("select-visible", `#${WAVE_QOL_SELECT_VISIBLE_ID}`, "Button missing.");
+          return;
+        }
+        selectVisible.click();
+
+        const quickAttack = document.querySelector(WAVE_QOL_ATTACK_SELECTOR);
+        if (!quickAttack) {
+          failStep("quick-attack", WAVE_QOL_ATTACK_SELECTOR, "Attack button missing.");
+          return;
+        }
+        quickAttack.click();
+
+        setStatus("Automation complete.", "success");
+      };
+
+      return { run };
+    };
+
+    const automation = setupWaveAutomation();
     if (isWavePage) {
       const footerSection = document.createElement("div");
       footerSection.className = "veyra-addon-wave-section veyra-addon-wave-section--footer";
@@ -765,6 +1033,9 @@
 
     applyFilters();
     applyImageVisibility();
+    if (automation) {
+      automation.run();
+    }
 
     const lockFilters = (locked) => {
       const inputs = filterList.querySelectorAll("input[type='checkbox']");
@@ -946,15 +1217,21 @@
   };
 
     const requestLoot = async (monsterId, opts = {}) => {
-      const url = `/loot.php`;
+      const url = pageType === "guild_dungeon_location" ? "/dungeon_loot.php" : "/loot.php";
       const params = new URLSearchParams();
-      params.set("monster_id", String(monsterId || ""));
-      params.set("user_id", String(userId || ""));
       if (pageType === "guild_dungeon_location") {
         params.set("dgmid", String(monsterId || ""));
         const instanceId = opts.instanceId || pageInstanceId;
         if (instanceId) {
           params.set("instance_id", String(instanceId));
+        }
+        if (userId) {
+          params.set("user_id", String(userId));
+        }
+      } else {
+        params.set("monster_id", String(monsterId || ""));
+        if (userId) {
+          params.set("user_id", String(userId));
         }
       }
       const body = params.toString();
@@ -978,7 +1255,7 @@
     };
 
     const handleSingleLoot = async (monsterId, name, opts = {}) => {
-      if (!userId) {
+      if (!userId && pageType !== "guild_dungeon_location") {
         warn("Cannot loot: missing user id cookie");
         showModal({
           title: "Loot failed",
@@ -1046,7 +1323,7 @@
   };
 
     const runBulkLoot = async (desiredCount) => {
-      if (!userId) {
+      if (!userId && pageType !== "guild_dungeon_location") {
         warn("Cannot bulk loot: missing user id cookie");
         showModal({
           title: "Bulk loot unavailable",

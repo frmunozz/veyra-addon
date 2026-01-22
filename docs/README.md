@@ -23,6 +23,10 @@
   - "hide all" / "show all" buttons; selecting 0 types hides all monster cards (no auto-restore).
   - A "Show monster images" checkbox that hides/shows `.monster-img` elements.
   - Filter selections persist per wave page via `localStorage["veyra-addon-wave-filters:${pathname}?${search}"]` and are shared between alive/dead views.
+- Wave automation form mounts on `active_wave.php` pages that include `#waveQolPanel` + `#fNameSel`, persists per gate/wave or event/wave, and runs once on load when enabled:
+  - Sets `#fNameSel` to the stored monster value.
+  - Toggles `#fUnjoined` off then on.
+  - Clicks `#btnSelectVisible` and `#waveQolPanel > div.qol-top > div.qol-attacks > button:nth-child(3)`.
 - Dead monsters (`hide_dead_monsters=0`) enable bulk loot controls with quick buttons (1/5/10/15/all) + a custom count input; "all" prompts for confirmation and an in-progress run shows a Stop button.
 - Looting calls `POST /loot.php` with form-encoded `monster_id` + `user_id` (from `demon`/`user_id` cookies), `credentials: "include"`, spaced by ~500ms; bulk loot shows a progress badge and aggregates results into one modal.
 - Bulk loot skips monsters already successfully looted in the current page session (tracked in-memory across quick loot + bulk loot; resets on reload).
@@ -32,3 +36,4 @@
 - Filter selections persist per location via `localStorage["veyra-addon-wave-filters:/guild_dungeon_location.php:location_id={location_id}"]` (shared across different `instance_id` values).
 - Monster name rows are prefixed with `[AA/TT]` (alive/total) per monster name, padded to two digits under 100 (e.g., `[05/10]`).
 - Dead monsters get Quick loot + View buttons and bulk loot processes only visible dead monsters (skipping already-looted ids for the current session).
+- Looting uses `POST /dungeon_loot.php` with form-encoded `dgmid`, `instance_id`, and `user_id` (from `demon`/`user_id` cookies when available).
