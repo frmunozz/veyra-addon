@@ -17,7 +17,11 @@
   const WAVE_QOL_SELECT_ID = "fNameSel";
   const WAVE_QOL_UNJOINED_ID = "fUnjoined";
   const WAVE_QOL_SELECT_VISIBLE_ID = "btnSelectVisible";
-  const WAVE_QOL_ATTACK_SELECTOR = "#waveQolPanel > div.qol-top > div.qol-attacks > button:nth-child(3)";
+  const WAVE_QOL_ATTACKS_SELECTOR = "#waveQolPanel > div.qol-top > div.qol-attacks > button";
+  const DEFAULT_ATTACK_STAM = 50;
+  const DEFAULT_RELOAD_DELAY_SEC = 30;
+  const STAMINA_VALUE_ID = "stamina_span";
+  const PAGE_LOAD_TIMESTAMP = Date.now();
   const DATASET_NAME_KEY = "veyraAddonMonsterName";
   const DATASET_ID_KEY = "veyraAddonMonsterId";
   const GUILD_MONSTER_CONTAINER_SELECTORS = [
@@ -727,6 +731,26 @@
       return Array.from(options.entries()).sort((a, b) => a[1].localeCompare(b[1]));
     };
 
+    const buildAttackOptions = () => {
+      const options = new Map();
+      const buttons = Array.from(document.querySelectorAll(WAVE_QOL_ATTACKS_SELECTOR));
+      buttons.forEach((button) => {
+        const rawStam = button?.dataset?.stam;
+        const stamValue = Number.parseInt(rawStam, 10);
+        if (!Number.isFinite(stamValue)) return;
+        const label = cleanText(button.textContent) || `Attack (${stamValue})`;
+        if (!options.has(stamValue)) {
+          options.set(stamValue, label);
+        }
+      });
+      if (!options.size) {
+        [1, 10, 50, 100, 200].forEach((stamValue) => {
+          options.set(stamValue, `Attack (${stamValue})`);
+        });
+      }
+      return Array.from(options.entries()).sort((a, b) => a[0] - b[0]);
+    };
+
     const setupWaveAutomation = () => {
       if (!isWavePage) return null;
       const hasQolPanel = Boolean(document.getElementById(WAVE_QOL_PANEL_ID));
@@ -734,18 +758,31 @@
       if (!hasQolPanel || !hasQolSelect) return null;
 
       const storageKey = buildWaveAutomationKey();
+      const defaultState = {
+        enabled: false,
+        selection: "",
+        attackStam: DEFAULT_ATTACK_STAM,
+        autoReload: true,
+        reloadDelaySec: DEFAULT_RELOAD_DELAY_SEC,
+      };
       const loadState = () => {
-        if (!storageKey) return { enabled: false, selection: "" };
+        if (!storageKey) return { ...defaultState };
         try {
           const raw = localStorage.getItem(storageKey);
-          if (!raw) return { enabled: false, selection: "" };
+          if (!raw) return { ...defaultState };
           const parsed = JSON.parse(raw);
+          const parsedAttack = Number.parseInt(parsed?.attackStam, 10);
+          const parsedDelay = Number.parseInt(parsed?.reloadDelaySec, 10);
           return {
             enabled: Boolean(parsed && parsed.enabled),
             selection: typeof parsed?.selection === "string" ? parsed.selection : "",
+            attackStam: Number.isFinite(parsedAttack) ? parsedAttack : DEFAULT_ATTACK_STAM,
+            autoReload: typeof parsed?.autoReload === "boolean" ? parsed.autoReload : true,
+            reloadDelaySec:
+              Number.isFinite(parsedDelay) && parsedDelay > 0 ? parsedDelay : DEFAULT_RELOAD_DELAY_SEC,
           };
         } catch (_err) {
-          return { enabled: false, selection: "" };
+          return { ...defaultState };
         }
       };
       const saveState = (nextState) => {
@@ -759,6 +796,16 @@
 
       const state = loadState();
       let ran = false;
+      let reloadTimer = null;
+      let autoReloadLocked = false;
+
+      const getStaminaValue = () => {
+        const staminaEl = document.getElementById(STAMINA_VALUE_ID);
+        if (!staminaEl) return null;
+        const rawValue = cleanText(staminaEl.textContent).replace(/,/g, "");
+        const staminaValue = Number.parseInt(rawValue, 10);
+        return Number.isFinite(staminaValue) ? staminaValue : null;
+      };
 
       const section = document.createElement("div");
       section.className = "veyra-addon-wave-section veyra-addon-wave-automation";
@@ -796,6 +843,58 @@
       selectRow.appendChild(selectLabel);
       selectRow.appendChild(select);
 
+      const attackRow = document.createElement("div");
+      attackRow.className = "veyra-addon-wave-automation__row";
+      const attackLabel = document.createElement("span");
+      attackLabel.className = "veyra-addon-wave-automation__label";
+      attackLabel.textContent = "Attack";
+
+      const attackSelect = document.createElement("select");
+      attackSelect.className = "veyra-addon-wave-automation__select";
+      attackSelect.setAttribute("aria-label", "Wave automation attack stamina");
+
+      const attackOptions = buildAttackOptions();
+      attackOptions.forEach(([value, label]) => {
+        const option = document.createElement("option");
+        option.value = String(value);
+        option.textContent = label;
+        attackSelect.appendChild(option);
+      });
+
+      attackRow.appendChild(attackLabel);
+      attackRow.appendChild(attackSelect);
+
+      const reloadRow = document.createElement("div");
+      reloadRow.className = "veyra-addon-wave-automation__row";
+      const reloadLabel = document.createElement("span");
+      reloadLabel.className = "veyra-addon-wave-automation__label";
+      reloadLabel.textContent = "Auto reload";
+
+      const reloadControls = document.createElement("div");
+      reloadControls.className = "veyra-addon-wave-automation__reload";
+
+      const reloadCheckbox = document.createElement("input");
+      reloadCheckbox.type = "checkbox";
+      reloadCheckbox.className = "veyra-addon-wave-automation__checkbox";
+      reloadCheckbox.setAttribute("aria-label", "Enable auto reload");
+
+      const reloadInput = document.createElement("input");
+      reloadInput.type = "number";
+      reloadInput.min = "1";
+      reloadInput.className = "veyra-addon-wave-automation__input";
+      reloadInput.setAttribute("aria-label", "Auto reload delay in seconds");
+
+      const reloadSuffix = document.createElement("span");
+      reloadSuffix.className = "veyra-addon-wave-automation__suffix";
+      reloadSuffix.textContent = "sec";
+
+      reloadControls.appendChild(reloadCheckbox);
+      reloadControls.appendChild(reloadInput);
+      reloadControls.appendChild(reloadSuffix);
+
+      reloadRow.appendChild(reloadLabel);
+      reloadRow.appendChild(reloadControls);
+
       const actions = document.createElement("div");
       actions.className = "veyra-addon-wave-automation__actions";
       const toggle = document.createElement("button");
@@ -813,12 +912,72 @@
 
       const selectionExists = (value) =>
         Array.from(select.options).some((option) => option.value === value);
+      const attackValueExists = (value) =>
+        Array.from(attackSelect.options).some(
+          (option) => Number.parseInt(option.value, 10) === value,
+        );
+      const normalizeAttackValue = (value) => {
+        if (Number.isFinite(value) && attackValueExists(value)) return value;
+        if (attackValueExists(DEFAULT_ATTACK_STAM)) return DEFAULT_ATTACK_STAM;
+        const fallback = Number.parseInt(attackSelect.options[0]?.value, 10);
+        return Number.isFinite(fallback) ? fallback : DEFAULT_ATTACK_STAM;
+      };
+      const normalizeReloadDelay = (value) => {
+        const parsed = Number.parseInt(value, 10);
+        return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_RELOAD_DELAY_SEC;
+      };
+      const clearReloadTimer = () => {
+        if (!reloadTimer) return;
+        window.clearTimeout(reloadTimer);
+        reloadTimer = null;
+      };
+      const setAutoReloadLock = (locked) => {
+        autoReloadLocked = locked;
+        reloadCheckbox.disabled = locked;
+        reloadInput.disabled = locked;
+        if (locked) {
+          if (state.autoReload) {
+            state.autoReload = false;
+            saveState(state);
+          }
+          reloadCheckbox.checked = false;
+        }
+      };
+      const scheduleReload = () => {
+        clearReloadTimer();
+        if (!state.enabled || !state.autoReload) return { scheduled: false };
+        const staminaValue = getStaminaValue();
+        if (Number.isFinite(staminaValue) && staminaValue < 100) {
+          setAutoReloadLock(true);
+          return { scheduled: false, locked: true, staminaValue };
+        }
+        setAutoReloadLock(false);
+        const delayMs = Math.max(
+          0,
+          state.reloadDelaySec * 1000 - (Date.now() - PAGE_LOAD_TIMESTAMP),
+        );
+        reloadTimer = window.setTimeout(() => {
+          const currentStam = getStaminaValue();
+          if (Number.isFinite(currentStam) && currentStam < 100) {
+            setAutoReloadLock(true);
+            announceState();
+            return;
+          }
+          location.reload();
+        }, delayMs);
+        return { scheduled: true, delaySeconds: Math.max(0, Math.ceil(delayMs / 1000)) };
+      };
 
       if (state.selection && selectionExists(state.selection)) {
         select.value = state.selection;
       } else {
         select.value = "";
       }
+      state.attackStam = normalizeAttackValue(state.attackStam);
+      attackSelect.value = String(state.attackStam);
+      state.reloadDelaySec = normalizeReloadDelay(state.reloadDelaySec);
+      reloadInput.value = String(state.reloadDelaySec);
+      reloadCheckbox.checked = state.autoReload;
 
       const updateToggleLabel = () => {
         toggle.textContent = state.enabled ? "Disable" : "Enable";
@@ -827,15 +986,30 @@
 
       const announceState = () => {
         const selectedLabel = select.options[select.selectedIndex]?.textContent?.trim() || "Select a monster";
+        const attackLabel = attackSelect.options[attackSelect.selectedIndex]?.textContent?.trim() || "Attack";
+        const reloadLabel = autoReloadLocked
+          ? "Auto reload disabled (stamina < 100)."
+          : state.autoReload
+            ? `Auto reload in ${state.reloadDelaySec}s.`
+            : "Auto reload off.";
         if (state.enabled) {
-          setStatus(`Enabled for "${selectedLabel}". Reload to run.`, "ready");
+          setStatus(`Enabled for "${selectedLabel}" (${attackLabel}). ${reloadLabel}`, autoReloadLocked ? "error" : "ready");
         } else {
           setStatus("Disabled.", "idle");
         }
       };
 
       updateToggleLabel();
+      const initialStam = getStaminaValue();
+      if (Number.isFinite(initialStam) && initialStam < 100) {
+        setAutoReloadLock(true);
+      } else {
+        setAutoReloadLock(false);
+      }
       announceState();
+      if (state.enabled && state.autoReload) {
+        scheduleReload();
+      }
 
       select.addEventListener("change", () => {
         state.selection = select.value;
@@ -845,6 +1019,52 @@
         }
       });
 
+      attackSelect.addEventListener("change", () => {
+        const nextValue = Number.parseInt(attackSelect.value, 10);
+        state.attackStam = normalizeAttackValue(nextValue);
+        attackSelect.value = String(state.attackStam);
+        saveState(state);
+        if (state.enabled) {
+          announceState();
+        }
+      });
+
+      const commitReloadDelay = () => {
+        state.reloadDelaySec = normalizeReloadDelay(reloadInput.value);
+        reloadInput.value = String(state.reloadDelaySec);
+        saveState(state);
+        if (state.enabled && state.autoReload) {
+          scheduleReload();
+        }
+        if (state.enabled) {
+          announceState();
+        }
+      };
+
+      reloadCheckbox.addEventListener("change", () => {
+        if (autoReloadLocked) {
+          reloadCheckbox.checked = false;
+          return;
+        }
+        state.autoReload = reloadCheckbox.checked;
+        saveState(state);
+        if (state.enabled && state.autoReload) {
+          scheduleReload();
+        } else {
+          clearReloadTimer();
+        }
+        if (state.enabled) {
+          announceState();
+        }
+      });
+
+      reloadInput.addEventListener("change", commitReloadDelay);
+      reloadInput.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter") return;
+        event.preventDefault();
+        commitReloadDelay();
+      });
+
       toggle.addEventListener("click", () => {
         if (!state.enabled) {
           if (!select.value) {
@@ -852,10 +1072,15 @@
             return;
           }
           state.selection = select.value;
+          state.attackStam = normalizeAttackValue(Number.parseInt(attackSelect.value, 10));
+          attackSelect.value = String(state.attackStam);
+          state.reloadDelaySec = normalizeReloadDelay(reloadInput.value);
+          reloadInput.value = String(state.reloadDelaySec);
           state.enabled = true;
           saveState(state);
           updateToggleLabel();
           announceState();
+          scheduleReload();
           return;
         }
 
@@ -863,9 +1088,12 @@
         saveState(state);
         updateToggleLabel();
         announceState();
+        clearReloadTimer();
       });
 
       body.appendChild(selectRow);
+      body.appendChild(attackRow);
+      body.appendChild(reloadRow);
       body.appendChild(actions);
       body.appendChild(status);
 
@@ -924,14 +1152,28 @@
         }
         selectVisible.click();
 
-        const quickAttack = document.querySelector(WAVE_QOL_ATTACK_SELECTOR);
+        const attackStam = normalizeAttackValue(state.attackStam);
+        if (state.attackStam !== attackStam) {
+          state.attackStam = attackStam;
+          attackSelect.value = String(attackStam);
+          saveState(state);
+        }
+        const attackSelector = `#${WAVE_QOL_PANEL_ID} > div.qol-top > div.qol-attacks > button[data-stam="${attackStam}"]`;
+        const quickAttack = document.querySelector(attackSelector);
         if (!quickAttack) {
-          failStep("quick-attack", WAVE_QOL_ATTACK_SELECTOR, "Attack button missing.");
+          failStep("quick-attack", attackSelector, `Attack button missing for ${attackStam} stamina.`);
           return;
         }
         quickAttack.click();
 
-        setStatus("Automation complete.", "success");
+        const reloadStatus = scheduleReload();
+        if (reloadStatus?.scheduled) {
+          setStatus(`Automation complete. Reloading in ${reloadStatus.delaySeconds}s.`, "ready");
+        } else if (reloadStatus?.locked) {
+          announceState();
+        } else {
+          setStatus("Automation complete.", "success");
+        }
       };
 
       return { run };

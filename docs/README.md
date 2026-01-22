@@ -23,10 +23,11 @@
   - "hide all" / "show all" buttons; selecting 0 types hides all monster cards (no auto-restore).
   - A "Show monster images" checkbox that hides/shows `.monster-img` elements.
   - Filter selections persist per wave page via `localStorage["veyra-addon-wave-filters:${pathname}?${search}"]` and are shared between alive/dead views.
-- Wave automation form mounts on `active_wave.php` pages that include `#waveQolPanel` + `#fNameSel`, persists per gate/wave or event/wave, and runs once on load when enabled:
+- Wave automation form mounts on `active_wave.php` pages that include `#waveQolPanel` + `#fNameSel`, persists per gate/wave or event/wave (monster, attack stamina, auto-reload toggle + delay), and runs once on load when enabled:
   - Sets `#fNameSel` to the stored monster value.
   - Toggles `#fUnjoined` off then on.
-  - Clicks `#btnSelectVisible` and `#waveQolPanel > div.qol-top > div.qol-attacks > button:nth-child(3)`.
+  - Clicks `#btnSelectVisible` and the QOL attack button under `#waveQolPanel > div.qol-top > div.qol-attacks` matching the selected `data-stam` (defaults to 50).
+  - Auto-reload defaults to enabled with a 30s delay and runs only when automation is enabled; if `#stamina_span` is below 100, auto-reload is disabled, persisted, and the checkbox is disabled.
 - Dead monsters (`hide_dead_monsters=0`) enable bulk loot controls with quick buttons (1/5/10/15/all) + a custom count input; "all" prompts for confirmation and an in-progress run shows a Stop button.
 - Looting calls `POST /loot.php` with form-encoded `monster_id` + `user_id` (from `demon`/`user_id` cookies), `credentials: "include"`, spaced by ~500ms; bulk loot shows a progress badge and aggregates results into one modal.
 - Bulk loot skips monsters already successfully looted in the current page session (tracked in-memory across quick loot + bulk loot; resets on reload).

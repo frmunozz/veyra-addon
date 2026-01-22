@@ -267,6 +267,37 @@
   padding: 8px 10px;
 }
 
+.veyra-addon-wave-automation__reload {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+}
+
+.veyra-addon-wave-automation__checkbox {
+  width: 16px;
+  height: 16px;
+  accent-color: #5d9af5;
+}
+
+.veyra-addon-wave-automation__input {
+  width: 70px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  color: #f3f7ff;
+  padding: 6px 8px;
+}
+
+.veyra-addon-wave-automation__input:disabled {
+  opacity: 0.6;
+}
+
+.veyra-addon-wave-automation__suffix {
+  font-size: 12px;
+  color: #b7c6e4;
+}
+
 .veyra-addon-wave-automation__actions {
   display: flex;
   justify-content: flex-start;
