@@ -11,8 +11,8 @@
   const FAVORITES_KEY = C.FAVORITES_KEY || "veyraAddonFavorites";
   const SECTION_STATE_KEY = C.SECTION_STATE_KEY || "veyraAddonSectionState";
   const GUILD_DASH_PATH = "/guild_dash.php";
-  const WINTER_FESTIVAL_PATH = "/a_lizardmen_winter.php";
-  const WINTER_PROGRESS_REFRESH_MS = 5 * 60 * 1000;
+  const LUNAR_EVENT_PATH = "/lunar_plague.php";
+  const LUNAR_PROGRESS_REFRESH_MS = 5 * 60 * 1000;
 
   const DEFAULT_SECTION_STATE = {
     navigation: true,
@@ -26,10 +26,10 @@
     holeItem: null,
     waveDropdown: buildWaveDropdown(),
     guildDropdown: buildGuildDungeonsDropdown(),
-    winterDropdown: buildWinterAuroraDropdown("Loading..."),
-    winterProgressTimer: null,
-    winterProgressInFlight: false,
-    winterProgressLastUpdatedAt: 0,
+    lunarDropdown: buildLunarYearDropdown("Loading..."),
+    lunarProgressTimer: null,
+    lunarProgressInFlight: false,
+    lunarProgressLastUpdatedAt: 0,
     navRoot: null,
     aside: null,
     navFab: null,
@@ -346,22 +346,22 @@
     };
   }
 
-  function buildWinterAuroraDropdown(progressLabel, isOpen = false) {
+  function buildLunarYearDropdown(progressLabel, isOpen = false) {
     return {
       type: "dropdown",
-      key: "winter-aurora-festival",
-      label: "Winter Aurora Festival",
-      icon: "🎄",
+      key: "lunar-year-event",
+      label: "Lunar Year Event",
+      icon: "🐀",
       subLabel: progressLabel,
       isOpen,
       items: [
-        createNavItem("Festival Page", WINTER_FESTIVAL_PATH, "", {
-          icon: "🎄",
-          key: favoriteKey({ label: "Winter Aurora Festival", href: WINTER_FESTIVAL_PATH }),
+        createNavItem("Event Page", LUNAR_EVENT_PATH, "", {
+          icon: "🐀",
+          key: favoriteKey({ label: "Lunar Year Event", href: LUNAR_EVENT_PATH }),
         }),
-        createNavItem("Carols in the Cold", "/active_wave.php?event=4&wave=2", "", {
+        createNavItem("Battle Wave 3", "/active_wave.php?event=6&wave=3", "", {
           icon: "🌊",
-          key: favoriteKey({ label: "Carols in the Cold", href: "/active_wave.php?event=4&wave=2" }),
+          key: favoriteKey({ label: "Battle Wave 3", href: "/active_wave.php?event=6&wave=3" }),
         }),
       ],
     };
@@ -383,8 +383,8 @@
     if (STATE.guildDropdown?.items) {
       STATE.guildDropdown.items.forEach(addItem);
     }
-    if (STATE.winterDropdown?.items) {
-      STATE.winterDropdown.items.forEach(addItem);
+    if (STATE.lunarDropdown?.items) {
+      STATE.lunarDropdown.items.forEach(addItem);
     }
     return catalog;
   }
@@ -616,7 +616,7 @@
     const catalog = buildCatalog();
     const { section: favoritesSection, favoriteKeys } = renderFavoritesSection(catalog);
 
-    const dropdowns = [STATE.waveDropdown, STATE.guildDropdown, STATE.winterDropdown].filter(Boolean);
+    const dropdowns = [STATE.waveDropdown, STATE.guildDropdown, STATE.lunarDropdown].filter(Boolean);
     if (dropdowns.length) {
       const dropdownSection = buildSection("Shortcuts", { collapsibleKey: "shortcuts" });
       dropdowns.forEach((dropdown) => {
@@ -659,86 +659,87 @@
     return new Intl.NumberFormat("en-US").format(value);
   }
 
-  function parseWinterProgress(html) {
+  function parseLunarProgress(html) {
     const parser = new DOMParser();
     const doc = parser.parseFromString(html, "text/html");
-    const currentNode = doc.querySelector(
-      "body > div.wrap > div:nth-child(3) > div > div:nth-child(1) > div:nth-child(5) > div:nth-child(1)"
-    );
-    const goalNode = doc.querySelector(
-      "body > div.wrap > div:nth-child(3) > div > div:nth-child(1) > div:nth-child(5) > div:nth-child(2)"
-    );
+    const rows = Array.from(doc.querySelectorAll("div.row"));
+    const progressRow = rows.find((row) => {
+      const text = cleanText(row.textContent || "").toLowerCase();
+      return text.includes("rats culled") && text.includes("total");
+    });
 
-    const currentText = cleanText(currentNode?.textContent || "");
-    const goalText = cleanText(goalNode?.textContent || "");
+    if (!progressRow) return null;
 
-    const current = parseNumberFromText(currentText, { pick: "first" });
-    const goal = parseNumberFromText(goalText, { pick: "last" });
+    const rowText = cleanText(progressRow.textContent || "");
+    const currentMatch = rowText.match(/([\d,]+)\s+rats\s+culled/i);
+    const goalMatch = rowText.match(/to\s+([\d,]+)\s+total/i);
+    const current = parseNumberFromText(currentMatch?.[1] || "", { pick: "first" });
+    const goal = parseNumberFromText(goalMatch?.[1] || "", { pick: "last" });
     if (!Number.isFinite(current) || !Number.isFinite(goal)) {
       return null;
     }
     return { current, goal };
   }
 
-  async function loadWinterProgress() {
-    if (STATE.winterProgressInFlight) return;
-    STATE.winterProgressInFlight = true;
-    STATE.winterProgressLastUpdatedAt = Date.now();
+  async function loadLunarProgress() {
+    if (STATE.lunarProgressInFlight) return;
+    STATE.lunarProgressInFlight = true;
+    STATE.lunarProgressLastUpdatedAt = Date.now();
 
     try {
-      const response = await fetch(WINTER_FESTIVAL_PATH, { credentials: "include" });
+      const response = await fetch(LUNAR_EVENT_PATH, { credentials: "include" });
       if (!response.ok) {
-        warn(`Winter Aurora Festival fetch failed with status ${response.status}; leaving fallback progress.`);
-        if (STATE.winterDropdown?.subLabel !== "—/—") {
-          STATE.winterDropdown = buildWinterAuroraDropdown("—/—", Boolean(STATE.winterDropdown?.isOpen));
+        warn(`Lunar Year Event fetch failed with status ${response.status}; leaving fallback progress.`);
+        if (STATE.lunarDropdown?.subLabel !== "—/—") {
+          STATE.lunarDropdown = buildLunarYearDropdown("—/—", Boolean(STATE.lunarDropdown?.isOpen));
           renderNav();
         }
         return;
       }
 
       const html = await response.text();
-      const parsed = parseWinterProgress(html);
+      const parsed = parseLunarProgress(html);
       if (!parsed) {
-        warn("Winter Aurora Festival progress parse failed; leaving fallback progress.");
-        if (STATE.winterDropdown?.subLabel !== "—/—") {
-          STATE.winterDropdown = buildWinterAuroraDropdown("—/—", Boolean(STATE.winterDropdown?.isOpen));
+        warn("Lunar Year Event progress parse failed; leaving fallback progress.");
+        if (STATE.lunarDropdown?.subLabel !== "—/—") {
+          STATE.lunarDropdown = buildLunarYearDropdown("—/—", Boolean(STATE.lunarDropdown?.isOpen));
           renderNav();
         }
         return;
       }
 
       const nextLabel = `${formatCount(parsed.current)}/${formatCount(parsed.goal)}`;
-      if (STATE.winterDropdown?.subLabel !== nextLabel) {
-        STATE.winterDropdown = buildWinterAuroraDropdown(nextLabel, Boolean(STATE.winterDropdown?.isOpen));
+      if (STATE.lunarDropdown?.subLabel !== nextLabel) {
+        STATE.lunarDropdown = buildLunarYearDropdown(nextLabel, Boolean(STATE.lunarDropdown?.isOpen));
         renderNav();
       }
     } catch (err) {
-      warn("Winter Aurora Festival fetch threw; leaving fallback progress.", err);
-      if (STATE.winterDropdown?.subLabel !== "—/—") {
-        STATE.winterDropdown = buildWinterAuroraDropdown("—/—", Boolean(STATE.winterDropdown?.isOpen));
+      warn("Lunar Year Event fetch threw; leaving fallback progress.", err);
+      if (STATE.lunarDropdown?.subLabel !== "—/—") {
+        STATE.lunarDropdown = buildLunarYearDropdown("—/—", Boolean(STATE.lunarDropdown?.isOpen));
         renderNav();
       }
     } finally {
-      STATE.winterProgressInFlight = false;
+      STATE.lunarProgressInFlight = false;
     }
   }
 
-  function startWinterProgressRefresh() {
-    if (STATE.winterProgressTimer) return;
+  function startLunarProgressRefresh() {
+    if (STATE.lunarProgressTimer) return;
     if (!document.getElementById(ASIDE_ID)) return;
 
-    loadWinterProgress();
-    STATE.winterProgressTimer = window.setInterval(() => {
+    loadLunarProgress();
+    STATE.lunarProgressTimer = window.setInterval(() => {
       if (!document.getElementById(ASIDE_ID)) {
-        window.clearInterval(STATE.winterProgressTimer);
-        STATE.winterProgressTimer = null;
+        window.clearInterval(STATE.lunarProgressTimer);
+        STATE.lunarProgressTimer = null;
         return;
       }
 
-      const elapsed = Date.now() - STATE.winterProgressLastUpdatedAt;
-      if (elapsed < WINTER_PROGRESS_REFRESH_MS) return;
-      loadWinterProgress();
-    }, WINTER_PROGRESS_REFRESH_MS);
+      const elapsed = Date.now() - STATE.lunarProgressLastUpdatedAt;
+      if (elapsed < LUNAR_PROGRESS_REFRESH_MS) return;
+      loadLunarProgress();
+    }, LUNAR_PROGRESS_REFRESH_MS);
   }
 
   function parseDungeonName(link) {
@@ -1004,7 +1005,7 @@
       const mounted = initAddonAside();
       if (!mounted) return;
       initGuildDungeonsDropdown();
-      startWinterProgressRefresh();
+      startLunarProgressRefresh();
     });
   }
 
