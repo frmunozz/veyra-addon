@@ -20,10 +20,15 @@
   const WAVE_QOL_ATTACKS_SELECTOR = "#waveQolPanel > div.qol-top > div.qol-attacks > button";
   const DEFAULT_ATTACK_STAM = 50;
   const DEFAULT_RELOAD_DELAY_SEC = 30;
+  const AUTOMATION_PLACEHOLDER_VALUE = "__veyra-addon-wave-automation-placeholder__";
   const STAMINA_VALUE_ID = "stamina_span";
   const PAGE_LOAD_TIMESTAMP = Date.now();
   const DATASET_NAME_KEY = "veyraAddonMonsterName";
   const DATASET_ID_KEY = "veyraAddonMonsterId";
+  const SORT_DEFAULT = "default";
+  const SORT_LOWEST_HP = "lowest_hp";
+  const SORT_HIGHEST_HP = "highest_hp";
+  const SORT_HIGHEST_MAX_HP = "highest_max_hp";
   const GUILD_MONSTER_CONTAINER_SELECTORS = [
     "body > div.wrap > div.grid > div:nth-child(1) > div:nth-child(2)",
     "body > div.wrap > div.grid > div:nth-child(1)",
@@ -347,6 +352,7 @@
       }
       return `veyra-addon-wave-filters:${location.pathname}?${location.search}`;
     })();
+    const sortStorageKey = isWavePage ? storageKey.replace("veyra-addon-wave-filters:", "veyra-addon-wave-sort:") : null;
     const uniqueNames = Array.from(new Set(monsterCards.map((card) => card.name))).filter(Boolean);
 
     const loadSavedFilters = () => {
@@ -364,6 +370,27 @@
     const saveFilters = (namesSet) => {
       try {
         localStorage.setItem(storageKey, JSON.stringify(Array.from(namesSet)));
+      } catch (_err) {
+        // ignore storage failures
+      }
+    };
+
+    const validSortModes = new Set([SORT_DEFAULT, SORT_LOWEST_HP, SORT_HIGHEST_HP, SORT_HIGHEST_MAX_HP]);
+    const loadSavedSort = () => {
+      if (!sortStorageKey) return SORT_DEFAULT;
+      try {
+        const stored = cleanText(localStorage.getItem(sortStorageKey));
+        return validSortModes.has(stored) ? stored : SORT_DEFAULT;
+      } catch (_err) {
+        return SORT_DEFAULT;
+      }
+    };
+
+    const saveSort = (mode) => {
+      if (!sortStorageKey) return;
+      const nextMode = validSortModes.has(mode) ? mode : SORT_DEFAULT;
+      try {
+        localStorage.setItem(sortStorageKey, nextMode);
       } catch (_err) {
         // ignore storage failures
       }
@@ -410,6 +437,31 @@
       const raw = Number.isFinite(count) ? count : 0;
       return raw < 100 ? String(raw).padStart(2, "0") : String(raw);
     };
+    const parseHpValueText = (value) => {
+      const match = cleanText(value).match(/([\d,]+)\s*\/\s*([\d,]+)/);
+      if (!match) return { current: null, max: null };
+      const current = Number.parseInt(match[1].replace(/,/g, ""), 10);
+      const max = Number.parseInt(match[2].replace(/,/g, ""), 10);
+      return {
+        current: Number.isFinite(current) ? current : null,
+        max: Number.isFinite(max) ? max : null,
+      };
+    };
+    const getHpValues = (card) => {
+      if (!card || !card.el) return { current: null, max: null };
+      let row = null;
+      const icon = card.el.querySelector(".stat-row .stat-icon.hp");
+      if (icon) {
+        row = icon.closest(".stat-row");
+      }
+      if (!row) {
+        const labels = Array.from(card.el.querySelectorAll(".stat-row .stat-label"));
+        const labelNode = labels.find((node) => cleanText(node.textContent).toLowerCase() === "hp");
+        row = labelNode ? labelNode.closest(".stat-row") : null;
+      }
+      const valueNode = row ? row.querySelector(".stat-value") : null;
+      return parseHpValueText(valueNode ? valueNode.textContent : "");
+    };
 
     if (pageType === "guild_dungeon_location") {
       monsterCards.forEach((card) => {
@@ -432,11 +484,25 @@
 
     const STATE = {
       selectedNames,
+      sortMode: loadSavedSort(),
       panelOpen: false,
       bulkRunning: false,
       bulkStopRequested: false,
       imagesVisible: true,
     };
+
+    const originalOrder = new Map();
+    const sortGroups = new Map();
+    monsterCards.forEach((card, index) => {
+      if (!card || !card.el) return;
+      originalOrder.set(card.el, index);
+      const parent = card.el.parentElement;
+      if (!parent) return;
+      if (!sortGroups.has(parent)) {
+        sortGroups.set(parent, []);
+      }
+      sortGroups.get(parent).push(card);
+    });
 
     const menuRoot = document.createElement("div");
     menuRoot.id = MENU_ID;
@@ -455,6 +521,7 @@
     panel.hidden = true;
     panel.style.display = "none";
 
+    let sortSelect = null;
     const filterSection = document.createElement("div");
     filterSection.className = "veyra-addon-wave-section";
     const filterHeading = document.createElement("div");
@@ -504,6 +571,47 @@
     filterHeadingActions.appendChild(showAllButton);
     filterHeading.appendChild(filterHeadingText);
     filterHeading.appendChild(filterHeadingActions);
+
+    if (isWavePage) {
+      const sortRow = document.createElement("label");
+      sortRow.className = "veyra-addon-wave-sort";
+
+      const sortLabel = document.createElement("span");
+      sortLabel.className = "veyra-addon-wave-sort__label";
+      sortLabel.textContent = "Sort by";
+
+      sortSelect = document.createElement("select");
+      sortSelect.className = "veyra-addon-wave-sort__select";
+      sortSelect.setAttribute("aria-label", "Sort monsters by");
+      [
+        { value: SORT_DEFAULT, label: "default order" },
+        { value: SORT_LOWEST_HP, label: "lowest hp" },
+        { value: SORT_HIGHEST_HP, label: "highest hp" },
+        { value: SORT_HIGHEST_MAX_HP, label: "highest max hp" },
+      ].forEach((option) => {
+        const opt = document.createElement("option");
+        opt.value = option.value;
+        opt.textContent = option.label;
+        sortSelect.appendChild(opt);
+      });
+
+      sortSelect.value = STATE.sortMode;
+      sortSelect.addEventListener("change", () => {
+        if (STATE.bulkRunning) {
+          sortSelect.value = STATE.sortMode;
+          return;
+        }
+        STATE.sortMode = validSortModes.has(sortSelect.value) ? sortSelect.value : SORT_DEFAULT;
+        saveSort(STATE.sortMode);
+        applySort();
+        applyFilters();
+      });
+
+      sortRow.appendChild(sortLabel);
+      sortRow.appendChild(sortSelect);
+      filterSection.appendChild(sortRow);
+    }
+
     const filterList = document.createElement("div");
     filterList.id = FILTER_LIST_ID;
     filterList.className = "veyra-addon-wave-filter";
@@ -718,6 +826,21 @@
 
     const buildAutomationOptions = () => {
       const options = new Map();
+      const nameSelect = document.getElementById(WAVE_QOL_SELECT_ID);
+      if (nameSelect) {
+        Array.from(nameSelect.options).forEach((option) => {
+          const value = typeof option.value === "string" ? option.value : "";
+          const label = cleanText(option.textContent) || value;
+          if (!label && value === "") return;
+          if (!options.has(value)) {
+            options.set(value, label || value);
+          }
+        });
+        if (options.size) {
+          return Array.from(options.entries());
+        }
+      }
+
       monsterCards.forEach((card) => {
         if (!card || !card.el) return;
         const rawValue = cleanText(card.el.getAttribute("data-name") || card.el.dataset?.name || "");
@@ -760,7 +883,7 @@
       const storageKey = buildWaveAutomationKey();
       const defaultState = {
         enabled: false,
-        selection: "",
+        selection: AUTOMATION_PLACEHOLDER_VALUE,
         attackStam: DEFAULT_ATTACK_STAM,
         autoReload: true,
         reloadDelaySec: DEFAULT_RELOAD_DELAY_SEC,
@@ -775,7 +898,10 @@
           const parsedDelay = Number.parseInt(parsed?.reloadDelaySec, 10);
           return {
             enabled: Boolean(parsed && parsed.enabled),
-            selection: typeof parsed?.selection === "string" ? parsed.selection : "",
+            selection:
+              typeof parsed?.selection === "string"
+                ? parsed.selection
+                : AUTOMATION_PLACEHOLDER_VALUE,
             attackStam: Number.isFinite(parsedAttack) ? parsedAttack : DEFAULT_ATTACK_STAM,
             autoReload: typeof parsed?.autoReload === "boolean" ? parsed.autoReload : true,
             reloadDelaySec:
@@ -828,7 +954,7 @@
       select.setAttribute("aria-label", "Wave automation monster");
 
       const defaultOption = document.createElement("option");
-      defaultOption.value = "";
+      defaultOption.value = AUTOMATION_PLACEHOLDER_VALUE;
       defaultOption.textContent = "Select a monster";
       select.appendChild(defaultOption);
 
@@ -910,8 +1036,10 @@
         status.dataset.state = stateClass;
       };
 
+      const isPlaceholderValue = (value) => value === AUTOMATION_PLACEHOLDER_VALUE;
       const selectionExists = (value) =>
         Array.from(select.options).some((option) => option.value === value);
+      const isValidSelectionValue = (value) => !isPlaceholderValue(value) && selectionExists(value);
       const attackValueExists = (value) =>
         Array.from(attackSelect.options).some(
           (option) => Number.parseInt(option.value, 10) === value,
@@ -968,10 +1096,10 @@
         return { scheduled: true, delaySeconds: Math.max(0, Math.ceil(delayMs / 1000)) };
       };
 
-      if (state.selection && selectionExists(state.selection)) {
+      if (selectionExists(state.selection) && !isPlaceholderValue(state.selection)) {
         select.value = state.selection;
       } else {
-        select.value = "";
+        select.value = AUTOMATION_PLACEHOLDER_VALUE;
       }
       state.attackStam = normalizeAttackValue(state.attackStam);
       attackSelect.value = String(state.attackStam);
@@ -1067,7 +1195,7 @@
 
       toggle.addEventListener("click", () => {
         if (!state.enabled) {
-          if (!select.value) {
+          if (!isValidSelectionValue(select.value)) {
             setStatus("Select a monster before enabling.", "error");
             return;
           }
@@ -1112,7 +1240,7 @@
         ran = true;
 
         const selectionValue = state.selection;
-        if (!selectionValue) {
+        if (!isValidSelectionValue(selectionValue)) {
           failStep("select-monster", `#${WAVE_QOL_SELECT_ID}`, "No stored selection.");
           return;
         }
@@ -1266,6 +1394,48 @@
       });
     };
 
+    const compareByOriginal = (a, b) => {
+      const aIndex = originalOrder.get(a.el) ?? 0;
+      const bIndex = originalOrder.get(b.el) ?? 0;
+      return aIndex - bIndex;
+    };
+
+    const compareByHpValue = (a, b, key, direction) => {
+      const aStats = getHpValues(a);
+      const bStats = getHpValues(b);
+      const aVal = key === "max" ? aStats.max : aStats.current;
+      const bVal = key === "max" ? bStats.max : bStats.current;
+      const aValid = Number.isFinite(aVal);
+      const bValid = Number.isFinite(bVal);
+      if (!aValid && !bValid) return compareByOriginal(a, b);
+      if (!aValid) return 1;
+      if (!bValid) return -1;
+      if (aVal === bVal) return compareByOriginal(a, b);
+      return direction === "asc" ? aVal - bVal : bVal - aVal;
+    };
+
+    const applySort = () => {
+      if (!isWavePage || !sortGroups.size) return;
+      const mode = validSortModes.has(STATE.sortMode) ? STATE.sortMode : SORT_DEFAULT;
+      const comparator = (() => {
+        if (mode === SORT_LOWEST_HP) {
+          return (a, b) => compareByHpValue(a, b, "current", "asc");
+        }
+        if (mode === SORT_HIGHEST_HP) {
+          return (a, b) => compareByHpValue(a, b, "current", "desc");
+        }
+        if (mode === SORT_HIGHEST_MAX_HP) {
+          return (a, b) => compareByHpValue(a, b, "max", "desc");
+        }
+        return compareByOriginal;
+      })();
+
+      sortGroups.forEach((cards, parent) => {
+        const sorted = [...cards].sort(comparator);
+        sorted.forEach((card) => parent.appendChild(card.el));
+      });
+    };
+
     const applyFilters = () => {
       monsterCards.forEach((card) => {
         const isSelected = STATE.selectedNames.has(card.name);
@@ -1273,6 +1443,7 @@
       });
     };
 
+    applySort();
     applyFilters();
     applyImageVisibility();
     if (automation) {
@@ -1284,6 +1455,7 @@
       inputs.forEach((input) => {
         input.disabled = locked;
       });
+      if (sortSelect) sortSelect.disabled = locked;
       hideAllButton.disabled = locked || !uniqueNames.length;
       showAllButton.disabled = locked || !uniqueNames.length;
       imagesCheckbox.disabled = locked;

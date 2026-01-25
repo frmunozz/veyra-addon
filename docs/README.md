@@ -21,10 +21,11 @@
 - Floating Wave Tools menu (top-right) includes:
   - Filter checkboxes labeled like `[05] Monster Name` (counts padded to 2 digits under 100).
   - "hide all" / "show all" buttons; selecting 0 types hides all monster cards (no auto-restore).
+  - A "Sort by" selector on wave pages with `default order`, `lowest hp`, `highest hp`, and `highest max hp`; selection persists per wave page via `localStorage["veyra-addon-wave-sort:${pathname}?${search}"]`.
   - A "Show monster images" checkbox that hides/shows `.monster-img` elements.
   - Filter selections persist per wave page via `localStorage["veyra-addon-wave-filters:${pathname}?${search}"]` and are shared between alive/dead views.
-- Wave automation form mounts on `active_wave.php` pages that include `#waveQolPanel` + `#fNameSel`, persists per gate/wave or event/wave (monster, attack stamina, auto-reload toggle + delay), and runs once on load when enabled:
-  - Sets `#fNameSel` to the stored monster value.
+- Wave automation form mounts on `active_wave.php` pages that include `#waveQolPanel` + `#fNameSel`, persists per gate/wave or event/wave (monster or All monsters, attack stamina, auto-reload toggle + delay), and runs once on load when enabled:
+  - Sets `#fNameSel` to the stored monster value (including the empty value for "All monsters").
   - Toggles `#fUnjoined` off then on.
   - Clicks `#btnSelectVisible` and the QOL attack button under `#waveQolPanel > div.qol-top > div.qol-attacks` matching the selected `data-stam` (defaults to 50).
   - Auto-reload defaults to enabled with a 30s delay and runs only when automation is enabled; if `#stamina_span` is below 100, auto-reload is disabled, persisted, and the checkbox is disabled.
